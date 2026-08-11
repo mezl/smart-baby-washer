@@ -58,9 +58,9 @@ Four wires cut into the panel link, through a level shifter, into the ESP32.
 Power and ground stay connected straight through, so the panel never loses its
 supply.
 
-⚠️ Note the shifter's real pad order — with **HV facing the machine, the channels
-run 4·3·2·1 down the board**, not 1·2·3·4. Wire to the silkscreen, not to where
-you expect the numbers to be.
+⚠️ Wire to the shifter's **printed pad names**, not to where you expect the
+numbers to be — with HV facing the machine the pads read 4·3·2·1 down the board.
+The photo inset in the diagram shows it.
 
 <p align="center">
   <img src="docs/diagrams/wiring-as-built.svg" width="1000"
