@@ -23,6 +23,11 @@ serial link — see [`docs/protocol.md`](docs/protocol.md).
 ## What you get
 
 <p align="center">
+  <img src="docs/images/webui/app-phone.png" width="300"
+       alt="The app on a phone: state and water temperature, a grid of wash programs with one selected, a START button and the stage list.">
+</p>
+
+<p align="center">
   <img src="docs/images/webui/overview.png" width="880"
        alt="The engineering web page: machine state, wash pump relay, decoded frames, cycle runner, error codes, lid status, and temperature and flow graphs.">
 </p>

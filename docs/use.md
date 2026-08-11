@@ -16,6 +16,30 @@ mDNS is used so nothing has to track the DHCP lease. If your network drops
 
 ---
 
+## The app
+
+<p align="center">
+  <img src="images/webui/app-phone.png" width="330"
+       alt="The app page at phone width: state and water temperature at the top, a grid of programs with the selected one highlighted, a START button, and the stage list of the chosen program.">
+</p>
+
+State and water temperature at the top, the programs as a grid, START, and the
+stage list of whatever is selected. Running, it shows the current stage and
+elapsed time; paused, it says why and whether it will resume on its own.
+
+**Nothing on this page can force a load.** It starts, stops and resumes cycles —
+that is all it can do. Hand it to someone who just wants clean bottles.
+
+<p align="center">
+  <img src="images/webui/app.png" width="820"
+       alt="The same app page in a desktop browser, the cards widening to fill the window.">
+</p>
+
+Custom programs appear here alongside the built-in ones as soon as you save them
+— see [cycles.md](cycles.md).
+
+---
+
 ## The engineering page
 
 > ⚠️ **Everything on `/dev` acts on a live machine.** Panel byte 1 is a load
