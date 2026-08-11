@@ -209,6 +209,8 @@ rather than only in the UI.
 
 ![RX from controller](images/webui/rx-controller.png)
 ![TX to panel](images/webui/tx-panel.png)
+![RX from panel](images/webui/rx-panel.png)
+![TX to controller](images/webui/tx-controller.png)
 
 ### RAW ROLLING LOG
 

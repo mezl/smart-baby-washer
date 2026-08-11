@@ -19,11 +19,17 @@ Gerbers ready to order. Perfectly fine on stripboard instead.
 ## 1. Find the panel link
 
 Look for a **4-pin connector** between the front panel and the controller board.
-On the Momcozy D8 it is silkscreened `CN2`.
+On the Momcozy D8 it is silkscreened `CN2` — the full board tour, including which
+connector drives which load, is in [board.md](board.md).
 
 <p align="center">
   <img src="images/01-board-connectors.jpg" width="880"
        alt="The D8 control board with its connectors labelled: CN2 panel link in red, flow meter and NTC and lid switch in cyan, wash and intake pumps in amber.">
+</p>
+
+<p align="center">
+  <img src="images/02-cn2-pinout.jpg" width="700"
+       alt="Close-up of the CN2 four-pin header: pins 1 and 2 are unlabelled signals, pin 3 is silkscreened GND, pin 4 is +5V.">
 </p>
 
 Two pins carry signals, two carry power:
@@ -128,7 +134,12 @@ and **the HV side groups by device** — ch1/ch2 controller, ch3/ch4 panel.
        alt="Seeed XIAO ESP32-C3 pinout: D0-D6 and their GPIO numbers on the left, 5V, GND, 3V3 and D10-D7 on the right.">
 </p>
 
-<sub>XIAO ESP32-C3 pinout © Seeed Studio.</sub>
+<p align="center">
+  <img src="images/xiao-esp32c3-block.png" width="760"
+       alt="XIAO ESP32-C3 block diagram: the ESP32-C3 module, USB-C, battery charger and the 2x7 castellated pin rows.">
+</p>
+
+<sub>XIAO ESP32-C3 pinout and block diagram © Seeed Studio.</sub>
 
 The C3 routes UARTs through the GPIO matrix, so any free pin works and a UART's
 two pins need not be adjacent. It has exactly **two** hardware UARTs — precisely

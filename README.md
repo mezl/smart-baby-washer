@@ -53,7 +53,9 @@ serial link — see [`docs/protocol.md`](docs/protocol.md).
    OTA working once it is sealed inside the machine.
 4. [**use.md**](docs/use.md) — the web app, the cycle runner, Home Assistant.
 
-Reference: [**protocol.md**](docs/protocol.md) ·
+Reference: [**board.md**](docs/board.md) — what is inside the machine ·
+[**protocol.md**](docs/protocol.md) ·
+[**cycles.md**](docs/cycles.md) ·
 [**api.md**](docs/api.md) ·
 [**troubleshooting.md**](docs/troubleshooting.md) ·
 [**hardware/pcb/**](hardware/pcb/) (optional carrier board)
