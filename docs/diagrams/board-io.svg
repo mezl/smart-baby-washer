@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 600" width="940" height="600" role="img" aria-label="Control board I/O map: mains-side relay loads on the left, low-voltage loads and sensors on the right, and CN2 as the only port that carries intent rather than power.">
+<style>
+  .bg{fill:#fbfbfd}
+  .card{fill:#ffffff;stroke:#c9d1d9;stroke-width:2}
+  .brd{fill:#f3f6fa;stroke:#57606a;stroke-width:2.5}
+  .mains{fill:#fdeeee;stroke:#e8342b}
+  .lv{fill:#eef4fb;stroke:#1b6ec2}
+  .sens{fill:#f2f8ee;stroke:#5a9e2f}
+  .cn2{fill:#eafaf1;stroke:#2f9e63;stroke-width:3}
+  .t{font:600 14px system-ui,sans-serif;fill:#111}
+  .s{font:12px system-ui,sans-serif;fill:#444}
+  .tiny{font:11px system-ui,sans-serif;fill:#666}
+  .mono{font:11.5px ui-monospace,Menlo,monospace;fill:#111}
+  .hdr{font:700 13px system-ui,sans-serif;fill:#57606a;letter-spacing:.06em}
+  .title{font:700 17px system-ui,sans-serif;fill:#111}
+  .w{stroke:#57606a;stroke-width:2;fill:none}
+  .wg{stroke:#2f9e63;stroke-width:3;fill:none}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#0d1117} .card{fill:#161b22;stroke:#30363d} .brd{fill:#1c2128;stroke:#8b949e}
+    .mains{fill:#2d1518;stroke:#ff7b72} .lv{fill:#12233a;stroke:#4493f8}
+    .sens{fill:#12241a;stroke:#3fb950} .cn2{fill:#0f2a1c;stroke:#3fb950}
+    .t,.title,.mono{fill:#e6edf3} .s{fill:#b1bac4} .tiny,.hdr{fill:#8b949e}
+    .w{stroke:#8b949e} .wg{stroke:#3fb950}
+  }
+</style>
+<rect class="bg" width="940" height="600"/>
+<text class="title" x="30" y="32">Control board I/O — and why CN2 is the interesting port</text>
+<text class="tiny" x="30" y="52">Every other connector carries power to a load or a reading from a sensor. CN2 is the only one that carries <tspan font-style="italic">intent</tspan>.</text>
+
+<!-- board -->
+<rect class="brd" x="355" y="120" width="230" height="380" rx="12"/>
+<text class="t" x="378" y="152">CONTROL BOARD</text>
+<text class="mono" x="378" y="174">BBW04001-UL-P</text>
+<text class="mono" x="378" y="192">QM-V7  ·  CEM-1 1-layer</text>
+<line x1="378" y1="208" x2="562" y2="208" stroke="#c9d1d9"/>
+<text class="s" x="378" y="230">MCU  FMD BF7612</text>
+<text class="s" x="378" y="250">8051 core, SOP-16</text>
+<text class="s" x="378" y="276">ULN2001D</text>
+<text class="tiny" x="378" y="294">Darlington load driver</text>
+<line x1="378" y1="312" x2="562" y2="312" stroke="#c9d1d9"/>
+<text class="s" x="378" y="334">SMPS  YT-PQ322084</text>
+<text class="tiny" x="378" y="352">isolated +5 V / +24 V</text>
+<text class="hdr" x="378" y="392">REPORTS, MOSTLY OBEYS</text>
+<text class="tiny" x="378" y="412">gates only the intake motor</text>
+<text class="tiny" x="378" y="430">heater · fill metering</text>
+
+<!-- MAINS side -->
+<text class="hdr" x="30" y="112">MAINS SIDE — 120 V, 560 W</text>
+<rect class="card mains" x="30" y="126" width="270" height="52" rx="8"/>
+<text class="t" x="46" y="148">Heater / steam element</text>
+<text class="mono" x="46" y="167">HEAT  ·  via relay</text>
+<rect class="card mains" x="30" y="190" width="270" height="52" rx="8"/>
+<text class="t" x="46" y="212">Drain pump  PSB-1</text>
+<text class="mono" x="46" y="231">PUMP  ·  303.7 &#937; coil</text>
+<rect class="card mains" x="30" y="254" width="270" height="42" rx="8"/>
+<text class="mono" x="46" y="281">ACN  ·  line in  ·  3 relays</text>
+<path class="w" d="M300,152 L350,180"/><path class="w" d="M300,216 L350,205"/><path class="w" d="M300,275 L350,235"/>
+
+<!-- LV loads -->
+<text class="hdr" x="640" y="112">LOW-VOLTAGE LOADS</text>
+<rect class="card lv" x="640" y="126" width="270" height="52" rx="8"/>
+<text class="t" x="656" y="148">Wash pump  24 V</text>
+<text class="mono" x="656" y="167">WS PUMP  ·  2-pin, no feedback</text>
+<rect class="card lv" x="640" y="190" width="270" height="46" rx="8"/>
+<text class="t" x="656" y="212">Intake pump  ·  43 &#937;</text>
+<text class="mono" x="656" y="229">DC PUMP</text>
+<rect class="card lv" x="640" y="248" width="270" height="46" rx="8"/>
+<text class="t" x="656" y="270">Blower fan + tach</text>
+<text class="mono" x="656" y="287">&#8722;FG+</text>
+<path class="w" d="M590,180 L636,152"/><path class="w" d="M590,205 L636,212"/><path class="w" d="M590,235 L636,270"/>
+
+<!-- sensors -->
+<text class="hdr" x="640" y="330">SENSORS IN</text>
+<rect class="card sens" x="640" y="344" width="270" height="46" rx="8"/>
+<text class="t" x="656" y="366">Flow meter (hall)</text>
+<text class="mono" x="656" y="383">FV  ·  the ONLY water sensing</text>
+<rect class="card sens" x="640" y="402" width="270" height="42" rx="8"/>
+<text class="mono" x="656" y="428">NTC 10k B3950   ·   SW2 lid</text>
+<path class="w" d="M590,300 L636,366"/><path class="w" d="M590,320 L636,420"/>
+
+<!-- CN2 -->
+<rect class="card cn2" x="640" y="466" width="270" height="76" rx="10"/>
+<text class="t" x="656" y="490">CN2 &#8212; front panel link</text>
+<text class="mono" x="656" y="510">1 SIG  2 SIG  3 GND  4 +5V</text>
+<text class="tiny" x="656" y="530">two signals + power &#8658; a UART pair</text>
+<path class="wg" d="M590,430 L636,500"/>
+<text class="t" x="120" y="470" fill="#2f9e63">&#9668; tap here</text>
+<path class="wg" d="M230,462 L636,504" stroke-dasharray="8 6"/>
+<text class="tiny" x="60" y="492">Spoof the panel and the board keeps</text>
+<text class="tiny" x="60" y="510">deciding what is safe — it drives the relays</text>
+<text class="tiny" x="60" y="528">instead and you own a 560 W heater.</text>
+
+<text class="tiny" x="30" y="575">Note: there is no level or float sensor anywhere in this machine. Water presence is inferred purely from flow-meter pulses during fill.</text>
+</svg>

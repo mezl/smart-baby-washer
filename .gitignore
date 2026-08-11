@@ -1,0 +1,16 @@
+firmware/include/secrets.h
+*.gcda
+*.gcno
+*.gcov
+*.kicad_prl
+*.npz
+.pio/
+__pycache__/
+
+# Eagle / KiCad lock and backup files
+~*.lck
+*.b#[0-9]
+*.s#[0-9]
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*-backups/

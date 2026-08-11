@@ -1,0 +1,138 @@
+# Momcozy D8 — Lovelace dashboard
+#
+# Settings → Dashboards → new dashboard → ⋮ → Raw configuration editor → paste.
+# Needs `packages/momcozy_d8.yaml` loaded first.
+#
+# Core cards only. Nothing here needs HACS.
+
+views:
+  - title: Bottle Washer
+    path: d8
+    icon: mdi:baby-bottle-outline
+    cards:
+      # --- what it is doing right now ------------------------------------
+      - type: heading
+        heading: Bottle Washer
+        heading_style: title
+        badges:
+          - type: entity
+            entity: sensor.d8_state
+          - type: entity
+            entity: sensor.d8_water_temperature
+          - type: entity
+            entity: binary_sensor.d8_lid
+
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: binary_sensor.d8_fault
+            state: "on"
+        card:
+          type: markdown
+          content: >-
+            ## ⚠️ {{ states('sensor.d8_error') }} —
+            {{ state_attr('sensor.d8_error','errtxt') }}
+
+            Fault codes **latch**. Clearing the condition is not enough; the
+            machine needs a power cycle before it will run again.
+
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: binary_sensor.d8_paused
+            state: "on"
+        card:
+          type: markdown
+          content: >-
+            ### ⏸ Paused —
+            {{ state_attr('sensor.d8_state','why') or 'waiting' }}
+
+            The cycle is held at step
+            {{ (state_attr('sensor.d8_state','stage') | int(0)) + 1 }} with every
+            load off. A lid pause resumes on its own once the lid is shut; a
+            water pause waits for **Resume**.
+
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: binary_sensor.d8_lid
+            state: "on"
+        card:
+          type: markdown
+          content: >-
+            **Lid is open.** The machine will run anyway — it does not stop for
+            this on its own — so the cycle will not start from here until it is
+            closed.
+
+      - type: entities
+        title: Now
+        show_header_toggle: false
+        entities:
+          - entity: sensor.d8_state
+            name: State
+          - entity: sensor.d8_program
+            name: Program
+          - entity: sensor.d8_stage
+            name: Stage
+          - entity: sensor.d8_water_temperature
+            name: Water temperature
+          - entity: sensor.d8_flow_count
+            name: Fill counter
+            secondary_info: last-changed
+
+      # --- run something -------------------------------------------------
+      - type: entities
+        title: Run a cycle
+        show_header_toggle: false
+        entities:
+          - entity: input_select.d8_program
+            name: Program
+          - type: buttons
+            entities:
+              - entity: script.d8_start_cycle
+                name: START
+                icon: mdi:play
+              - entity: script.d8_resume_cycle
+                name: RESUME
+                icon: mdi:play-pause
+              - entity: script.d8_stop_cycle
+                name: STOP
+                icon: mdi:stop
+          - type: attribute
+            entity: sensor.d8_state
+            attribute: why
+            name: Last stop reason
+            icon: mdi:information-outline
+
+      - type: markdown
+        content: >-
+          Cycles started here run under the **ESP32's** interlocks, not the
+          machine's — the controller gates nothing except the intake motor, and
+          neither end has a fill timeout. Do not run unattended.
+
+      # --- history -------------------------------------------------------
+      - type: history-graph
+        title: Temperature
+        hours_to_show: 3
+        entities:
+          - entity: sensor.d8_water_temperature
+            name: Water
+
+      - type: history-graph
+        title: Activity
+        hours_to_show: 12
+        entities:
+          - entity: binary_sensor.d8_running
+            name: Running
+          - entity: binary_sensor.d8_lid
+            name: Lid open
+          - entity: binary_sensor.d8_fault
+            name: Fault
+
+      - type: statistic
+        entity: sensor.d8_water_temperature
+        stat_type: max
+        period:
+          calendar:
+            period: day
+        name: Peak water temperature today

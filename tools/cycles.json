@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "_comment": [
+    "User programs for the D8 cycle runner. Load with:",
+    "    python3 cycle_tool.py load cycles.json",
+    "and read the device back with:",
+    "    python3 cycle_tool.py dump > cycles.json",
+    "",
+    "A stage is a load set, an optional amount, and an optional duration:",
+    "    drain 20s | fill 90 | wash+heat 5m | steam 7m | flush 70s | dry 10m",
+    "",
+    "loads:  wash  drain  heat  airheat  dry  intake  wait   (combine with +)",
+    "fill N: run the intake motor until N flow counts have arrived",
+    "flush:  drain and fill together, no target — the cool-down step",
+    "time:   20s, 5m, 1h; a bare number is seconds; a fill needs no time",
+    "",
+    "slot is 0-5. Anything not listed here is left alone; use --replace to",
+    "clear the slots you do not mention.",
+    "",
+    "The device validates every program and refuses the unsafe ones:",
+    "no water heater without a fill since the last drain, no intake without a",
+    "target, no untargeted flush with the drain shut. See docs/cycle.md."
+  ],
+
+  "programs": [
+    {
+      "slot": 0,
+      "name": "Quick check-up",
+      "comment": "Smallest useful run: one 20-count charge, a short heat, a short dry.",
+      "stages": ["drain 20s", "fill 20", "wash+heat 2m", "drain 20s", "dry 1m"]
+    },
+    {
+      "slot": 1,
+      "name": "Triple Wash",
+      "comment": "Three full wash-and-rinse rounds before the flush and dry.",
+      "stages": [
+        "drain 20s", "fill 90", "wash+heat 5m",
+        "drain 20s", "fill 80", "wash+heat 5m",
+        "drain 20s", "fill 80", "wash+heat 5m",
+        "flush 70s", "dry 7m"
+      ]
+    },
+    {
+      "slot": 2,
+      "name": "Rinse only",
+      "comment": "No heat at all — a cold rinse for something already clean.",
+      "stages": ["drain 20s", "fill 80", "wash 3m", "drain 20s"]
+    },
+    {
+      "slot": 3,
+      "name": "Long dry",
+      "comment": "For a load that came out damp. No water is drawn.",
+      "stages": ["dry 45m", "blower 30s"]
+    }
+  ]
+}

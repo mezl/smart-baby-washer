@@ -1,0 +1,147 @@
+#pragma once
+// Momcozy D8 CN2 sniffer — build-time configuration.
+// Secrets (WiFi + OTA password) live in secrets.h, which is gitignored.
+
+#include "secrets.h"
+
+#define FW_NAME     "d8-cn2sniffer"
+#define FW_VERSION  "1.0.0"
+
+// ---- Network identity ------------------------------------------------------
+// mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
+// the OTA uploader follow the board instead of an address that moves.
+#define OTA_HOSTNAME              "d8-sniffer"
+#define OTA_PORT                  3232
+
+#define WIFI_CONNECT_TIMEOUT_MS   20000UL   // stop *blocking* after this...
+#define WIFI_RETRY_MS             10000UL   // ...then re-kick the supplicant
+#define WIFI_REBOOT_AFTER_MS      60000UL   // ...and finally reboot
+
+// ---- Robustness ------------------------------------------------------------
+// The task watchdog is deliberately slack. It exists to catch a wedged loop(),
+// not to police latency — and an OTA flash write blocks loop() for seconds at a
+// time. (net.cpp feeds it from the OTA progress callback so that is safe.)
+#define WDT_TIMEOUT_MS            30000UL
+
+// Boot-loop guard. Three resets without ever reaching a healthy uptime and we
+// come up with the payload disabled and nothing running but WiFi + OTA.
+#define SAFE_MODE_AFTER_BOOTS     3
+#define HEALTHY_UPTIME_MS         30000UL   // uptime WITH WiFi that clears it
+
+// ---- CN2 tap ---------------------------------------------------------------
+// XIAO ESP32-C3 pin choice, see ../D8_REPAIR_SSOT.md §7b:
+//   D1..D4 are plain GPIOs — no strapping function, no ROM boot chatter.
+//   Avoided: GPIO2/8/9 (strapping; GPIO9 is also the BOOT button) and GPIO21,
+//   which is UART0 TX by default and which the ROM bootloader transmits boot
+//   messages on at every reset — wiring that to a line the main board listens
+//   on would inject garbage into the panel link on every reset.
+//
+// UART0 faces the main board, UART1 faces the front panel.
+//
+// AS-WIRED on the bench (2026-08-06), through a 4-ch BSS138 level converter:
+//
+//   controller pin 1  (board TX, OUTPUT) -> HV1 -> LV1 -> D1 / GPIO3   RX
+//   controller pin 2  (board RX, INPUT)  -> HV3 -> LV3 -> D2 / GPIO4   TX
+//   panel      pin 1  (panel RX, INPUT)  -> HV2 -> LV2 -> D3 / GPIO5   TX
+//   panel      pin 2  (panel TX, OUTPUT) -> HV4 -> LV4 -> D4 / GPIO6   RX
+//
+// The invariant that makes this safe: every ESP32 RX pin sits on a stub that is
+// DRIVEN by the other end, and every ESP32 TX pin sits on a stub that is an
+// INPUT at the other end. Two outputs on one wire is the only way to do damage.
+// Straight-through: converter channel N carries pin DN, so the board and the
+// converter line up one-to-one and there is nothing to mis-read. Any assignment
+// works electrically -- the C3's GPIO matrix routes a UART's RX and TX to any
+// pins -- so this is chosen for legibility, not necessity.
+//
+// These are only the DEFAULTS. /api/detect writes a discovered map to NVS, and
+// a saved map wins over anything here.
+#define PIN_RX_BOARD    3     // D1  <- controller pin 1  ch1  (controller TX)
+#define PIN_TX_BOARD    4     // D2  -> controller pin 2  ch2  (controller RX)
+#define PIN_TX_PANEL    5     // D3  -> panel pin 1       ch3  (panel RX)
+#define PIN_RX_PANEL    6     // D4  <- panel pin 2       ch4  (panel TX)
+
+// ---- flow meter, J3 on the carrier board -----------------------------------
+// The board splices the FV signal line the same way CN2 is spliced: cut it,
+// meter side to J3.1, controller side to J3.2. The ESP32 then sees every real
+// pulse and decides what the controller is told.
+//
+// Both signals must come off the SAME side of the XIAO to be routable on a
+// 2-layer board, and of the three GPIOs left free only GPIO10 (D10) and GPIO20
+// (D7) are on the right-hand column -- GPIO7 (D5) is on the left. That is what
+// moved FLOW_SIM off GPIO7.
+//
+// FLOW_SIM is OPEN-DRAIN on purpose: the hall sensor is open-collector with a
+// 10k pull-up, so we only ever pull low and let that pull-up make the high
+// level. Two open-drain outputs wire-OR, so the real sensor can stay connected.
+#define PIN_FLOW_IN     10    // D10 <- J3.1, pulses from the real meter
+#define PIN_FLOW_SIM    20    // D7  -> J3.2, what the controller sees
+
+// Switch simulators. A switch input is normally pulled up by the board and
+// shorted to ground when the switch closes, so OPEN-DRAIN low = "closed".
+// Releasing the pin leaves the real switch in charge.
+//
+// Only GPIO7 is left, so SW2 (the lid) gets it and SW1 gets none. SW1 is the
+// unidentified 3-pin switch; if you need it, it is still reachable on the
+// XIAO's own header pin -- the module is socketed.
+#define PIN_SW2_SIM     7     // D5  -> SW2 (lid switch) signal pin
+
+// ---- wash-pump relay, external ---------------------------------------------
+// The board's own low-side switch for WS PUMP does not close when panel b0 is
+// commanded, so the pump is driven by an external relay module instead.
+//
+// D5/D7/D10 are declared above for the switch and flow simulators but are NOT
+// WIRED on this machine, and -- this is the part that makes them safe to reuse
+// -- none of them is touched at boot. simSet() and flowSim() each call pinMode()
+// only when that feature is first used, and the flow input is only claimed by
+// the /api/detect scan. So an unused simulator pin is genuinely idle, not
+// merely unconnected.
+//
+// GPIO10 is the pick. It is the only free pin with no strapping role, no UART
+// role and no boot-time behaviour at all:
+//
+//   GPIO9  (D9)  BOOT button. Low at reset = ROM download mode. Unusable.
+//   GPIO2  (D0)  Strapping. Must be high at reset or SPI boot fails. Unusable.
+//   GPIO21 (D6)  UART0 TX -- the ROM prints the boot log on it at every reset.
+//   GPIO8  (D8)  Strapping for download boot; also blocks USB flashing if a
+//                module holds it low. OTA would still work, but no need.
+//   GPIO20 (D7)  UART0 RX. Not driven by the ROM, so usable, but taken.
+//   GPIO7  (D5)  Plain GPIO -- the clean alternative if D10 is inconvenient.
+//
+// Cost of this choice: the flow-meter tap loses its input pin. That tap is a
+// diagnostic; the pump is the machine's only means of washing. If the flow
+// splice is ever built, move the relay to GPIO7 and set it over HTTP -- the pin
+// is runtime-settable and persisted, so it costs a click, not a reflash.
+#define PIN_WS_RELAY    10    // D10 -> relay module IN
+//
+// ⚠️ AN EXTERNAL PULL-DOWN IS NOT OPTIONAL. Between reset and cn2::begin() the
+// pin is high-Z, and in SAFE MODE it is never configured at all. Whatever holds
+// the module in its OFF state during those windows has to be passive:
+//
+//   active-HIGH module ->  10k from the relay pin to GND   (idle low  = open)
+//   active-LOW  module ->  10k from the relay pin to 3V3   (idle high = open)
+//
+// Without it the pump can be energised by a crash, a reset, or a boot loop.
+//
+// This machine uses an ACTIVE-HIGH module, so the resistor goes to GND. Getting
+// this backwards is the one wiring error here that is actually dangerous: a
+// pull-UP on an active-high module drives the relay CLOSED for the whole of
+// every boot, and closed again on any crash or boot loop.
+#define WS_RELAY_ACTIVE_LOW   0
+//
+// The pump has no feedback of any kind, so the firmware cannot tell whether it
+// is running -- these two limits are the only protection there is.
+#define WS_RELAY_MAX_ON_MS    1800000UL  // 30 min hard cap, then latch open
+#define WS_RELAY_LINK_DEAD_MS 3000UL     // no panel frame this long -> open
+
+// Unknown until the first scope capture. Changeable at runtime over HTTP and
+// persisted in NVS, because guessing wrong should cost a click, not a reflash.
+#define DEFAULT_BAUD    9600UL
+
+// Ring buffer of captured bytes. 4096 × 8 B = 32 KB, comfortable next to WiFi.
+#define SNIFF_RING      4096
+
+// Bytes separated by more than this many character-times start a new frame.
+// 3.5 is the Modbus idle-line convention and works well for the poll/response
+// framing these appliance panels use.
+#define FRAME_GAP_CHARS 3.5f
+#define FRAME_GAP_MIN_US 400UL

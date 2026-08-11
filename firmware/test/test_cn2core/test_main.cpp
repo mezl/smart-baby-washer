@@ -1,0 +1,448 @@
+// Host-side tests for cn2core — the pure CN2 frame logic that cn2.cpp calls.
+//
+// Frames used here are real captures from the machine, not invented:
+//   A2 23 00 02 04 0D 02 88   controller, idle, lid off
+//   A2 18 00 03 04 0D 02 B2   controller, running
+//   A2 18 00 42 04 0E 02 F0   controller, lid off + E5
+//   AA 00 00 00 AA            panel, idle
+//   AA 20 40 20 EA            panel, intake motor + mode word
+#include <unity.h>
+#include <cn2core.h>
+#include <string.h>
+
+using namespace cn2core;
+
+static const uint8_t CTRL_IDLE[8] = {0xA2,0x23,0x00,0x02,0x04,0x0D,0x02,0x88};
+static const uint8_t CTRL_RUN [8] = {0xA2,0x18,0x00,0x03,0x04,0x0D,0x02,0xB2};
+static const uint8_t CTRL_E5  [8] = {0xA2,0x18,0x00,0x42,0x04,0x0E,0x02,0xF0};
+static const uint8_t PANEL_IDLE[5] = {0xAA,0x00,0x00,0x00,0xAA};
+static const uint8_t PANEL_RUN [5] = {0xAA,0x20,0x40,0x20,0xEA};
+
+// ---------------------------------------------------------------- framing ---
+
+void test_frameLenFor_known_headers(void) {
+  TEST_ASSERT_EQUAL_UINT8(8, frameLenFor(0xA2));
+  TEST_ASSERT_EQUAL_UINT8(5, frameLenFor(0xAA));
+}
+
+void test_frameLenFor_rejects_junk(void) {
+  TEST_ASSERT_EQUAL_UINT8(0, frameLenFor(0x00));
+  TEST_ASSERT_EQUAL_UINT8(0, frameLenFor(0xFF));
+  TEST_ASSERT_EQUAL_UINT8(0, frameLenFor(0xA3));   // one bit off a real header
+}
+
+void test_xorOf_matches_captured_checksums(void) {
+  TEST_ASSERT_EQUAL_UINT8(0x88, xorOf(CTRL_IDLE, 7));
+  TEST_ASSERT_EQUAL_UINT8(0xF0, xorOf(CTRL_E5,   7));
+  TEST_ASSERT_EQUAL_UINT8(0xEA, xorOf(PANEL_RUN, 4));
+}
+
+// The idle panel frame satisfies both a sum and an XOR check because every
+// payload byte is zero. Guards the documented trap of identifying the algorithm
+// from all-zero captures.
+void test_idle_panel_frame_is_ambiguous(void) {
+  uint8_t sum = 0;
+  for (int i = 0; i < 4; i++) sum += PANEL_IDLE[i];
+  TEST_ASSERT_EQUAL_UINT8(PANEL_IDLE[4], sum);
+  TEST_ASSERT_EQUAL_UINT8(PANEL_IDLE[4], xorOf(PANEL_IDLE, 4));
+}
+
+void test_checksumOk_accepts_real_frames(void) {
+  TEST_ASSERT_TRUE(checksumOk(CTRL_IDLE, 8));
+  TEST_ASSERT_TRUE(checksumOk(CTRL_RUN,  8));
+  TEST_ASSERT_TRUE(checksumOk(PANEL_IDLE,5));
+  TEST_ASSERT_TRUE(checksumOk(PANEL_RUN, 5));
+}
+
+void test_checksumOk_rejects_single_bit_flip(void) {
+  uint8_t bad[8]; memcpy(bad, CTRL_IDLE, 8);
+  bad[3] ^= 0x01;                                  // corrupt the status byte
+  TEST_ASSERT_FALSE(checksumOk(bad, 8));
+}
+
+void test_checksumOk_rejects_runt(void) {
+  TEST_ASSERT_FALSE(checksumOk(CTRL_IDLE, 1));
+  TEST_ASSERT_FALSE(checksumOk(CTRL_IDLE, 0));
+}
+
+// --------------------------------------------------------------- assembler ---
+
+void test_assembler_completes_a_frame(void) {
+  Assembler a;
+  for (int i = 0; i < 7; i++) TEST_ASSERT_EQUAL_UINT8(0, a.feed(CTRL_IDLE[i]));
+  TEST_ASSERT_EQUAL_UINT8(8, a.feed(CTRL_IDLE[7]));
+  TEST_ASSERT_EQUAL_UINT32(1, a.ok);
+  TEST_ASSERT_EQUAL_UINT32(0, a.bad);
+}
+
+void test_assembler_counts_a_corrupt_frame(void) {
+  Assembler a;
+  uint8_t bad[8]; memcpy(bad, CTRL_IDLE, 8); bad[5] ^= 0x20;
+  for (int i = 0; i < 8; i++) a.feed(bad[i]);
+  TEST_ASSERT_EQUAL_UINT32(0, a.ok);
+  TEST_ASSERT_EQUAL_UINT32(1, a.bad);
+}
+
+void test_assembler_skips_junk_before_a_header(void) {
+  Assembler a;
+  a.feed(0x00); a.feed(0x7F); a.feed(0xA3);        // none are headers
+  TEST_ASSERT_EQUAL_UINT8(0, a.n);
+  for (int i = 0; i < 5; i++) a.feed(PANEL_RUN[i]);
+  TEST_ASSERT_EQUAL_UINT32(1, a.ok);
+}
+
+// A byte lost on the wire must cost at most one frame, then resync.
+void test_assembler_resyncs_after_a_dropped_byte(void) {
+  Assembler a;
+  for (int i = 1; i < 8; i++) a.feed(CTRL_IDLE[i]);   // header dropped
+  for (int i = 0; i < 5; i++) a.feed(PANEL_RUN[i]);
+  for (int i = 0; i < 5; i++) a.feed(PANEL_RUN[i]);
+  TEST_ASSERT_TRUE(a.ok >= 1);                        // recovered
+}
+
+void test_assembler_handles_both_frame_types_interleaved(void) {
+  Assembler a;
+  for (int i = 0; i < 8; i++) a.feed(CTRL_IDLE[i]);
+  for (int i = 0; i < 5; i++) a.feed(PANEL_RUN[i]);
+  for (int i = 0; i < 8; i++) a.feed(CTRL_RUN[i]);
+  TEST_ASSERT_EQUAL_UINT32(3, a.ok);
+  TEST_ASSERT_EQUAL_UINT32(0, a.bad);
+}
+
+void test_assembler_reset_and_clear(void) {
+  Assembler a;
+  a.feed(0xA2); a.feed(0x23);
+  a.reset();
+  TEST_ASSERT_EQUAL_UINT8(0, a.n);
+  for (int i = 0; i < 5; i++) a.feed(PANEL_IDLE[i]);
+  TEST_ASSERT_EQUAL_UINT32(1, a.ok);
+  a.clearCounts();
+  TEST_ASSERT_EQUAL_UINT32(0, a.ok);
+  TEST_ASSERT_EQUAL_UINT32(0, a.bad);
+}
+
+// ----------------------------------------------------------------- thinner ---
+
+void test_thinner_passes_everything_by_default(void) {
+  Thinner t;
+  for (int i = 0; i < 10; i++) TEST_ASSERT_TRUE(t.atFrameStart());
+}
+
+void test_thinner_forwards_one_in_four(void) {
+  Thinner t; t.setEvery(4);
+  int fwd = 0;
+  for (int i = 0; i < 40; i++) if (t.atFrameStart()) fwd++;
+  TEST_ASSERT_EQUAL_INT(10, fwd);
+}
+
+void test_thinner_first_frame_always_forwards(void) {
+  Thinner t; t.setEvery(7);
+  TEST_ASSERT_TRUE(t.atFrameStart());
+}
+
+// setEvery(0) must not divide by zero.
+void test_thinner_zero_is_treated_as_one(void) {
+  Thinner t; t.setEvery(0);
+  TEST_ASSERT_EQUAL_UINT16(1, t.every);
+  for (int i = 0; i < 5; i++) TEST_ASSERT_TRUE(t.atFrameStart());
+}
+
+void test_thinner_setEvery_restarts_the_phase(void) {
+  Thinner t; t.setEvery(3);
+  t.atFrameStart(); t.atFrameStart();
+  t.setEvery(3);
+  TEST_ASSERT_TRUE(t.atFrameStart());
+}
+
+// ---------------------------------------------------------------- rewriting ---
+
+void test_applyMask_clear_then_set(void) {
+  TEST_ASSERT_EQUAL_UINT8(0x20, applyMask(0x00, 0x00, 0x20));
+  TEST_ASSERT_EQUAL_UINT8(0x00, applyMask(0x20, 0x20, 0x00));
+  TEST_ASSERT_EQUAL_UINT8(0x02, applyMask(0x22, 0x20, 0x00));
+  TEST_ASSERT_EQUAL_UINT8(0x01, applyMask(0x01, 0x00, 0x00));   // pass-through
+}
+
+// set wins over clr when both name the same bit.
+void test_applyMask_set_beats_clear(void) {
+  TEST_ASSERT_EQUAL_UINT8(0x08, applyMask(0x00, 0x08, 0x08));
+}
+
+void test_rewriteStatus_passthrough(void) {
+  StatusOvr o;
+  TEST_ASSERT_FALSE(o.active());
+  TEST_ASSERT_EQUAL_UINT8(0x02, rewriteStatus(0x02, o));
+}
+
+// The lid override must move BOTH sensors. Driving only the reed leaves the
+// machine seeing a closed reed and an open micro switch, which is not "lid shut".
+void test_rewriteStatus_forces_lid_on_clears_both(void) {
+  StatusOvr o; o.lid_mode = 1;
+  TEST_ASSERT_TRUE(o.active());
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewriteStatus(0x02, o));       // reed only
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewriteStatus(0x80, o));       // micro only
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewriteStatus(0x82, o));       // both
+  TEST_ASSERT_EQUAL_UINT8(0x01, rewriteStatus(0x83, o));       // bit 0 survives
+}
+
+void test_rewriteStatus_forces_lid_off_sets_both(void) {
+  StatusOvr o; o.lid_mode = 2;
+  TEST_ASSERT_EQUAL_UINT8(0x82, rewriteStatus(0x00, o));
+  TEST_ASSERT_EQUAL_UINT8(0x82, rewriteStatus(0x02, o));       // already half set
+  TEST_ASSERT_EQUAL_UINT8(0xC3, rewriteStatus(0x41, o));       // E5 + bit 0 survive
+}
+
+void test_lidClosed_needs_both_sensors(void) {
+  TEST_ASSERT_TRUE (lidClosed(0x00));
+  TEST_ASSERT_FALSE(lidClosed(0x02));                          // reed says off
+  TEST_ASSERT_FALSE(lidClosed(0x80));                          // micro says off
+  TEST_ASSERT_FALSE(lidClosed(0x82));
+  TEST_ASSERT_TRUE (lidClosed(0x41));                          // E5 set, lid still shut
+}
+
+void test_rewriteStatus_can_clear_e5(void) {
+  StatusOvr o; o.clr = 0x40;
+  TEST_ASSERT_EQUAL_UINT8(0x02, rewriteStatus(0x42, o));
+}
+
+void test_rewriteStatus_mask_applies_after_lid(void) {
+  StatusOvr o; o.lid_mode = 2; o.clr = 0x82;                   // contradictory
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewriteStatus(0x00, o));       // clr wins, it is last
+}
+
+void test_rewritePanelByte_passthrough(void) {
+  PanelOvr o;
+  TEST_ASSERT_FALSE(o.active());
+  for (uint8_t i = 0; i < 5; i++)
+    TEST_ASSERT_EQUAL_UINT8(PANEL_RUN[i], rewritePanelByte(i, PANEL_RUN[i], o));
+}
+
+void test_rewritePanelByte_injects_a_press(void) {
+  PanelOvr o; o.pressing = true; o.press_mask = 0x20;
+  TEST_ASSERT_TRUE(o.active());
+  TEST_ASSERT_EQUAL_UINT8(0x20, rewritePanelByte(1, 0x00, o));
+  TEST_ASSERT_EQUAL_UINT8(0x22, rewritePanelByte(1, 0x02, o));  // OR, not replace
+}
+
+void test_rewritePanelByte_forces_a_load_bit_off(void) {
+  PanelOvr o; o.p1_clr = 0x20;
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewritePanelByte(1, 0x20, o));
+}
+
+void test_rewritePanelByte_only_touches_byte_1(void) {
+  PanelOvr o; o.p1_set = 0xFF;
+  TEST_ASSERT_EQUAL_UINT8(0xAA, rewritePanelByte(0, 0xAA, o));  // header
+  TEST_ASSERT_EQUAL_UINT8(0x40, rewritePanelByte(2, 0x40, o));  // mode word
+  TEST_ASSERT_EQUAL_UINT8(0xEA, rewritePanelByte(4, 0xEA, o));  // checksum slot
+}
+
+void test_rewritePanelByte_forces_the_mode_word(void) {
+  PanelOvr o; o.p2 = 0x40; o.p3 = 0x20;
+  TEST_ASSERT_TRUE(o.active());
+  TEST_ASSERT_EQUAL_UINT8(0x40, rewritePanelByte(2, 0x00, o));
+  TEST_ASSERT_EQUAL_UINT8(0x20, rewritePanelByte(3, 0x00, o));
+}
+
+// p2 = 0 must force zero, not read as "pass through" — that is why it is int16_t.
+void test_rewritePanelByte_mode_zero_is_a_real_value(void) {
+  PanelOvr o; o.p2 = 0;
+  TEST_ASSERT_TRUE(o.active());
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewritePanelByte(2, 0x40, o));
+}
+
+void test_probe_blanks_the_payload_and_wins(void) {
+  PanelOvr o; o.probe = true; o.pressing = true; o.press_mask = 0x20; o.p1_set = 0xFF;
+  TEST_ASSERT_EQUAL_UINT8(0xAA, rewritePanelByte(0, 0xAA, o));
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewritePanelByte(1, 0x20, o));
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewritePanelByte(2, 0x40, o));
+  TEST_ASSERT_EQUAL_UINT8(0x00, rewritePanelByte(3, 0x20, o));
+}
+
+void test_pressing_without_a_mask_is_not_active(void) {
+  PanelOvr o; o.pressing = true; o.press_mask = 0x00;
+  TEST_ASSERT_FALSE(o.active());
+}
+
+// --------------------------------------------------------- stream rewriter ---
+
+void test_stream_passthrough_is_byte_identical(void) {
+  StreamRewriter r;
+  for (uint8_t i = 0; i < 8; i++)
+    TEST_ASSERT_EQUAL_UINT8(CTRL_IDLE[i], r.step(CTRL_IDLE[i], 7, false));
+}
+
+void test_stream_recomputes_checksum_when_overriding(void) {
+  StreamRewriter r;
+  StatusOvr o; o.lid_mode = 1;                     // 0x02 -> 0x00
+  uint8_t out[8];
+  for (uint8_t i = 0; i < 8; i++) {
+    uint8_t b = CTRL_IDLE[i];
+    if (i == 3) b = rewriteStatus(b, o);
+    out[i] = r.step(b, 7, true);
+  }
+  TEST_ASSERT_EQUAL_UINT8(0x00, out[3]);
+  TEST_ASSERT_TRUE(checksumOk(out, 8));            // still a valid frame
+  TEST_ASSERT_EQUAL_UINT8(0x8A, out[7]);           // 0x88 ^ 0x02
+}
+
+void test_stream_recomputes_panel_checksum(void) {
+  StreamRewriter r;
+  PanelOvr o; o.p1_set = 0x20;
+  uint8_t out[5];
+  for (uint8_t i = 0; i < 5; i++)
+    out[i] = r.step(rewritePanelByte(i, PANEL_IDLE[i], o), 4, true);
+  TEST_ASSERT_EQUAL_UINT8(0x20, out[1]);
+  TEST_ASSERT_TRUE(checksumOk(out, 5));
+}
+
+void test_stream_reset_between_frames(void) {
+  StreamRewriter r;
+  for (uint8_t i = 0; i < 8; i++) r.step(CTRL_IDLE[i], 7, true);
+  r.reset();
+  TEST_ASSERT_EQUAL_UINT8(0, r.i);
+  TEST_ASSERT_EQUAL_UINT8(0, r.x);
+  uint8_t out[5];
+  for (uint8_t i = 0; i < 5; i++) out[i] = r.step(PANEL_RUN[i], 4, true);
+  TEST_ASSERT_TRUE(checksumOk(out, 5));
+}
+
+// Rewriting a byte to the value it already had must leave the frame untouched.
+void test_stream_noop_override_is_identity(void) {
+  StreamRewriter r;
+  uint8_t out[8];
+  for (uint8_t i = 0; i < 8; i++) out[i] = r.step(CTRL_IDLE[i], 7, true);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(CTRL_IDLE, out, 8);
+}
+
+// ---------------------------------------------------------------- autodetect ---
+
+void test_deviceFromHeader(void) {
+  TEST_ASSERT_EQUAL_INT(DEV_CONTROLLER, deviceFromHeader(0xA2));
+  TEST_ASSERT_EQUAL_INT(DEV_PANEL,      deviceFromHeader(0xAA));
+  TEST_ASSERT_EQUAL_INT(DEV_UNKNOWN,    deviceFromHeader(0x00));
+}
+
+void test_isDriven_threshold(void) {
+  TEST_ASSERT_FALSE(isDriven(0));
+  TEST_ASSERT_FALSE(isDriven(20));                 // boundary: not driven
+  TEST_ASSERT_TRUE (isDriven(21));
+  TEST_ASSERT_TRUE (isDriven(108));                // real measurement, GPIO3
+  TEST_ASSERT_TRUE (isDriven(66));                 // real measurement, GPIO6
+}
+
+void test_resolveRx_both_orders(void) {
+  int8_t c = -1, p = -1;
+  TEST_ASSERT_TRUE(resolveRx(0xA2, 0xAA, 3, 6, c, p));
+  TEST_ASSERT_EQUAL_INT8(3, c);
+  TEST_ASSERT_EQUAL_INT8(6, p);
+
+  c = p = -1;
+  TEST_ASSERT_TRUE(resolveRx(0xAA, 0xA2, 3, 6, c, p));
+  TEST_ASSERT_EQUAL_INT8(6, c);
+  TEST_ASSERT_EQUAL_INT8(3, p);
+}
+
+// Fails closed rather than guessing — a wrong guess wires a TX pin to an output.
+void test_resolveRx_refuses_ambiguous_input(void) {
+  int8_t c = -1, p = -1;
+  TEST_ASSERT_FALSE(resolveRx(0xA2, 0xA2, 3, 6, c, p));   // both controller
+  TEST_ASSERT_FALSE(resolveRx(0xAA, 0xAA, 3, 6, c, p));   // both panel
+  TEST_ASSERT_FALSE(resolveRx(0x00, 0xAA, 3, 6, c, p));   // one silent
+  TEST_ASSERT_EQUAL_INT8(-1, c);
+  TEST_ASSERT_EQUAL_INT8(-1, p);
+}
+
+// ---------------------------------------------------- end-to-end relay path ---
+
+// One full frame through assemble -> rewrite -> stream, the way pump() runs it.
+void test_end_to_end_forced_intake_motor(void) {
+  Assembler in;
+  StreamRewriter r;
+  PanelOvr o; o.p1_set = 0x20;                     // force the intake motor on
+  uint8_t out[5];
+
+  for (uint8_t i = 0; i < 5; i++) {
+    in.feed(PANEL_IDLE[i]);
+    out[i] = r.step(rewritePanelByte(i, PANEL_IDLE[i], o), 4, o.active());
+  }
+  TEST_ASSERT_EQUAL_UINT32(1, in.ok);              // input was valid
+  TEST_ASSERT_EQUAL_UINT8(0xAA, out[0]);
+  TEST_ASSERT_EQUAL_UINT8(0x20, out[1]);
+  TEST_ASSERT_TRUE(checksumOk(out, 5));            // output is valid too
+
+  Assembler back;                                   // the controller's view
+  for (uint8_t i = 0; i < 5; i++) back.feed(out[i]);
+  TEST_ASSERT_EQUAL_UINT32(1, back.ok);
+  TEST_ASSERT_EQUAL_UINT32(0, back.bad);
+}
+
+// A thinned stream must emit whole frames only — never a partial one.
+void test_thinned_stream_emits_whole_frames(void) {
+  Thinner t; t.setEvery(3);
+  int emitted = 0, frames = 0;
+  Assembler rx;
+  for (int f = 0; f < 9; f++) {
+    bool fwd = t.atFrameStart();
+    for (uint8_t i = 0; i < 5; i++)
+      if (fwd) { emitted++; if (rx.feed(PANEL_RUN[i])) frames++; }
+  }
+  TEST_ASSERT_EQUAL_INT(15, emitted);              // 3 frames x 5 bytes
+  TEST_ASSERT_EQUAL_INT(3, frames);
+  TEST_ASSERT_EQUAL_UINT32(0, rx.bad);
+}
+
+int main(int, char **) {
+  UNITY_BEGIN();
+  RUN_TEST(test_frameLenFor_known_headers);
+  RUN_TEST(test_frameLenFor_rejects_junk);
+  RUN_TEST(test_xorOf_matches_captured_checksums);
+  RUN_TEST(test_idle_panel_frame_is_ambiguous);
+  RUN_TEST(test_checksumOk_accepts_real_frames);
+  RUN_TEST(test_checksumOk_rejects_single_bit_flip);
+  RUN_TEST(test_checksumOk_rejects_runt);
+
+  RUN_TEST(test_assembler_completes_a_frame);
+  RUN_TEST(test_assembler_counts_a_corrupt_frame);
+  RUN_TEST(test_assembler_skips_junk_before_a_header);
+  RUN_TEST(test_assembler_resyncs_after_a_dropped_byte);
+  RUN_TEST(test_assembler_handles_both_frame_types_interleaved);
+  RUN_TEST(test_assembler_reset_and_clear);
+
+  RUN_TEST(test_thinner_passes_everything_by_default);
+  RUN_TEST(test_thinner_forwards_one_in_four);
+  RUN_TEST(test_thinner_first_frame_always_forwards);
+  RUN_TEST(test_thinner_zero_is_treated_as_one);
+  RUN_TEST(test_thinner_setEvery_restarts_the_phase);
+
+  RUN_TEST(test_applyMask_clear_then_set);
+  RUN_TEST(test_applyMask_set_beats_clear);
+  RUN_TEST(test_rewriteStatus_passthrough);
+  RUN_TEST(test_rewriteStatus_forces_lid_on_clears_both);
+  RUN_TEST(test_rewriteStatus_forces_lid_off_sets_both);
+  RUN_TEST(test_lidClosed_needs_both_sensors);
+  RUN_TEST(test_rewriteStatus_can_clear_e5);
+  RUN_TEST(test_rewriteStatus_mask_applies_after_lid);
+  RUN_TEST(test_rewritePanelByte_passthrough);
+  RUN_TEST(test_rewritePanelByte_injects_a_press);
+  RUN_TEST(test_rewritePanelByte_forces_a_load_bit_off);
+  RUN_TEST(test_rewritePanelByte_only_touches_byte_1);
+  RUN_TEST(test_rewritePanelByte_forces_the_mode_word);
+  RUN_TEST(test_rewritePanelByte_mode_zero_is_a_real_value);
+  RUN_TEST(test_probe_blanks_the_payload_and_wins);
+  RUN_TEST(test_pressing_without_a_mask_is_not_active);
+
+  RUN_TEST(test_stream_passthrough_is_byte_identical);
+  RUN_TEST(test_stream_recomputes_checksum_when_overriding);
+  RUN_TEST(test_stream_recomputes_panel_checksum);
+  RUN_TEST(test_stream_reset_between_frames);
+  RUN_TEST(test_stream_noop_override_is_identity);
+
+  RUN_TEST(test_deviceFromHeader);
+  RUN_TEST(test_isDriven_threshold);
+  RUN_TEST(test_resolveRx_both_orders);
+  RUN_TEST(test_resolveRx_refuses_ambiguous_input);
+
+  RUN_TEST(test_end_to_end_forced_intake_motor);
+  RUN_TEST(test_thinned_stream_emits_whole_frames);
+  return UNITY_END();
+}

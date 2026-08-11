@@ -1,0 +1,250 @@
+# Momcozy D8 — Home Assistant package
+#
+# Drop in `config/packages/momcozy_d8.yaml`, add this to configuration.yaml:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# then set the IP below and restart.
+#
+# Talks to the ESP32's HTTP API directly. No MQTT broker, no custom component,
+# no cloud. One REST poll a second feeds every entity here.
+#
+# ⚠️ The switches and buttons below drive 110 V heaters and a water pump through
+# the ESP32's cycle runner, NOT through the machine's own panel. The runner
+# carries its own interlocks because the machine has none — see docs/safety.md.
+# Anything that starts a cycle is deliberately a `button`, not a `switch`, so a
+# careless automation cannot leave one latched on.
+
+# ---------------------------------------------------------------------------
+# One poll, many entities.
+# ---------------------------------------------------------------------------
+rest:
+  - resource: http://d8-sniffer.local/api/app
+    scan_interval: 5
+    timeout: 4
+    sensor:
+      - name: "D8 state"
+        unique_id: d8_state
+        value_template: >-
+          {{ ['Idle','Running','Complete','Stopped','Paused'][value_json.state | int(0)] }}
+        icon: mdi:washing-machine
+        json_attributes:
+          - mode
+          - stage
+          - elapsed
+          - why
+          - modes
+          - stages
+
+      - name: "D8 water temperature"
+        unique_id: d8_temp
+        value_template: "{{ value_json.temp | int(0) }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+
+      - name: "D8 flow count"
+        unique_id: d8_flow
+        value_template: "{{ value_json.flow | int(0) }}"
+        unit_of_measurement: "counts"
+        state_class: measurement
+        # Cumulative pulses for the CURRENT fill; the controller zeroes it when
+        # the fill completes. Not a lifetime total.
+
+      - name: "D8 program"
+        unique_id: d8_program
+        value_template: >-
+          {% set m = value_json.modes %}{% set i = value_json.mode | int(0) %}
+          {{ m[i].n if m and i < m | length else 'unknown' }}
+        icon: mdi:playlist-play
+
+      - name: "D8 stage"
+        unique_id: d8_stage
+        value_template: >-
+          {% set s = value_json.stages %}{% set i = value_json.stage | int(0) %}
+          {% if value_json.state | int(0) in [1, 4] and s and i < s | length %}
+            {{ i + 1 }}/{{ s | length }} — {{ s[i].name }}
+          {% else %}—{% endif %}
+        icon: mdi:progress-clock
+
+      - name: "D8 error"
+        unique_id: d8_error
+        value_template: >-
+          {{ value_json.err if value_json.err else 'none' }}
+        icon: mdi:alert-circle-outline
+        json_attributes:
+          - errtxt
+
+    binary_sensor:
+      - name: "D8 running"
+        unique_id: d8_running
+        value_template: "{{ (value_json.state | int(0)) == 1 }}"
+        device_class: running
+
+      - name: "D8 paused"
+        unique_id: d8_paused
+        value_template: "{{ (value_json.state | int(0)) == 4 }}"
+        # A pause is not a fault: the lid is open, or the tank needs refilling.
+        # A lid pause clears itself; a water pause waits for Resume.
+
+      - name: "D8 lid"
+        unique_id: d8_lid
+        # HA's `opening` class is on = OPEN, and the machine reports "closed".
+        value_template: "{{ not value_json.lid }}"
+        device_class: opening
+
+      - name: "D8 fault"
+        unique_id: d8_fault
+        value_template: "{{ value_json.err is not none }}"
+        device_class: problem
+
+# ---------------------------------------------------------------------------
+# Commands.
+# ---------------------------------------------------------------------------
+rest_command:
+  d8_start:
+    url: "http://d8-sniffer.local/api/cycle?run=start"
+    method: POST
+  d8_stop:
+    url: "http://d8-sniffer.local/api/cycle?run=stop"
+    method: POST
+  d8_resume:
+    url: "http://d8-sniffer.local/api/cycle?run=resume"
+    method: POST
+  d8_set_program:
+    url: "http://d8-sniffer.local/api/cycle?mode={{ mode }}"
+    method: POST
+  d8_set_temps:
+    url: "http://d8-sniffer.local/api/cycle?water={{ water }}&dry={{ dry }}"
+    method: POST
+
+# ---------------------------------------------------------------------------
+# Program selector. Index order must match the firmware's program list.
+# ---------------------------------------------------------------------------
+input_select:
+  d8_program:
+    name: D8 program
+    options:
+      - Rapid Wash
+      - Normal Wash
+      - Steam Steril
+      - Drying
+      - 72h Storage
+      - Self-Clean
+    initial: Normal Wash
+    icon: mdi:playlist-play
+
+automation:
+  - id: d8_program_push
+    alias: "D8: push program selection to the machine"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_select.d8_program
+    actions:
+      - action: rest_command.d8_set_program
+        data:
+          mode: >-
+            {{ state_attr('input_select.d8_program','options')
+               .index(states('input_select.d8_program')) }}
+
+  - id: d8_program_pull
+    alias: "D8: follow the machine if the program is changed elsewhere"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.d8_program
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ states('sensor.d8_program') not in ['unknown','unavailable']
+             and states('sensor.d8_program') != states('input_select.d8_program') }}
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.d8_program
+        data:
+          option: "{{ states('sensor.d8_program') }}"
+
+  - id: d8_notify_paused
+    alias: "D8: notify when a cycle pauses"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.d8_paused
+        to: "on"
+        for: "00:00:10"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: "Bottle washer paused"
+          message: >-
+            {{ state_attr('sensor.d8_state','why') or 'paused' }}.
+            A lid pause resumes itself once the lid is shut; a water pause waits
+            for Resume.
+
+  - id: d8_notify_done
+    alias: "D8: notify when a cycle finishes or stops"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.d8_state
+        to: "Complete"
+      - trigger: state
+        entity_id: sensor.d8_state
+        to: "Stopped"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: >-
+            Bottle washer {{ 'finished' if is_state('sensor.d8_state','Complete')
+                             else 'stopped' }}
+          message: >-
+            {{ states('sensor.d8_program') }} —
+            {{ state_attr('sensor.d8_state','why') or 'completed normally' }}
+
+  - id: d8_notify_fault
+    alias: "D8: notify on a controller fault"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.d8_fault
+        to: "on"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: "Bottle washer fault: {{ states('sensor.d8_error') }}"
+          message: >-
+            {{ state_attr('sensor.d8_error','errtxt') }}.
+            Fault codes latch — the machine needs a power cycle to clear.
+
+script:
+  d8_start_cycle:
+    alias: "D8: start the selected cycle"
+    icon: mdi:play
+    mode: single
+    sequence:
+      # The machine will happily run with the lid off; the runner only stops for
+      # it if no override is active. Refuse here rather than find out later.
+      - condition: state
+        entity_id: binary_sensor.d8_lid
+        state: "off"
+      - action: rest_command.d8_start
+
+  d8_stop_cycle:
+    alias: "D8: stop"
+    icon: mdi:stop
+    mode: single
+    sequence:
+      - action: rest_command.d8_stop
+
+  d8_resume_cycle:
+    alias: "D8: resume a paused cycle"
+    icon: mdi:play-pause
+    mode: single
+    sequence:
+      - condition: state
+        entity_id: binary_sensor.d8_lid
+        state: "off"
+      - action: rest_command.d8_resume

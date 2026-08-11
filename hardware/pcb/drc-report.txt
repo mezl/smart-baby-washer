@@ -1,0 +1,28 @@
+** Drc report for  **
+** Created on 2026-08-07 15:44:41 **
+
+** Found 6 DRC violations **
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(8.7400 mm, 6.6500 mm): Footprint U2
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(6.2000 mm, 5.3800 mm): Footprint U1
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(28.4000 mm, 15.5400 mm): Footprint J4
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(28.4000 mm, 5.3800 mm): Footprint J3
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(25.6000 mm, 9.1900 mm): Footprint J1
+[lib_footprint_issues]: The current configuration does not include the library 'cn2interceptor'.
+    Local override; Severity: warning
+    @(2.8000 mm, 9.1900 mm): Footprint J2
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **
