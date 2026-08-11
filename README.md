@@ -63,6 +63,19 @@ supply.
        alt="As-built wiring: the controller and front panel connected through all four channels of a BSS138 level converter to a XIAO ESP32-C3, with power and ground passing straight through.">
 </p>
 
+<p align="center">
+  <img src="docs/images/diy-module.jpg" width="880"
+       alt="The finished module inside the machine: a XIAO ESP32-C3 on a scrap of perfboard with a 4-pin JST lead to the panel link and an external antenna, tucked beside the pump and wiring loom.">
+</p>
+
+A scrap of perfboard is enough — that is a XIAO with a 4-pin JST lead to the
+panel link, living beside the pump. The optional carrier PCB in
+[`hardware/pcb/`](hardware/pcb/) is tidier, not better.
+
+💡 **Fit the external antenna.** The XIAO has a u.FL connector, and inside a metal
+and wet plastic appliance the on-board antenna struggles. WiFi dropping out is
+also OTA dropping out.
+
 Full procedure — including the passive detect step that confirms which pin is
 which **before** anything is cut — in [**build.md**](docs/build.md).
 
