@@ -52,6 +52,20 @@ are this board's, and none of them are guaranteed to carry over.
        alt="Timelines of a wash cycle and a self-clean cycle: temperature curve above six load lanes, every fill marked with its commanded target and the flow count delivered.">
 </p>
 
+## What you build
+
+Four wires cut into the panel link, through a level shifter, into the ESP32.
+Power and ground stay connected straight through, so the panel never loses its
+supply.
+
+<p align="center">
+  <img src="docs/diagrams/wiring-as-built.svg" width="1000"
+       alt="As-built wiring: the controller and front panel connected through all four channels of a BSS138 level converter to a XIAO ESP32-C3, with power and ground passing straight through.">
+</p>
+
+Full procedure — including the passive detect step that confirms which pin is
+which **before** anything is cut — in [**build.md**](docs/build.md).
+
 ## Getting there
 
 1. ⚠️ [**safety.md**](docs/safety.md) — what the machine does *not* protect you
