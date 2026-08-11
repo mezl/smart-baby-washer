@@ -7,6 +7,10 @@ programs, six slots of your own, per-stage durations you can edit and save.
 it.** The START button takes two clicks for that reason. Read
 [safety.md](safety.md) before the first run, and do not leave it unattended.
 
+⚠️ The built-in programs are the **Momcozy D8's**, from its manual and from
+captures of that machine. On any other washer treat them as a starting point to
+edit, not as correct.
+
 ## The ESP32 cycle runner
 
 Same shape, but every stage boundary and every load is decided here, and the panel

@@ -2,6 +2,11 @@
 
 ⚠️ Read [safety.md](safety.md) first. Unplug the machine before opening it.
 
+⚠️ **This procedure was written on a Momcozy D8 (`BW05`).** The connector
+location, pin order, logic level and load bits are that board's. On any other
+machine, measure each of them yourself — steps 1–3 are exactly the measurements
+that tell you whether it matches.
+
 ## Parts
 
 | | |

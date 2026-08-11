@@ -3,8 +3,14 @@
 **9600 baud, 8N1, 5 V logic, LSB-first, no parity, one stop bit, both lines idle
 HIGH, XOR checksum.**
 
-Verified on a Momcozy D8 (`BW05`) with an ESP32-C3 as a transparent
-man-in-the-middle, across full wash, self-clean and storage cycles.
+Decoded on **one machine** — a Momcozy D8 (`BW05`), controller board
+`BBW04001-UL-P` — with an ESP32-C3 as a transparent man-in-the-middle, across
+full wash, self-clean and storage cycles.
+
+⚠️ **Nothing here has been checked against a second machine.** The physical layer
+and framing are the parts most likely to carry over; the **load and status bit
+meanings are this controller's firmware** and should be treated as unverified
+anywhere else. Confirm each one by watching the load act before you rely on it.
 
 **The panel is the command authority; the controller executes.** The panel runs its
 whole UI locally and transmits a bitmap of which loads to energise plus a fill

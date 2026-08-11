@@ -7,9 +7,12 @@ and the controller board, forwards every byte, and can rewrite any of them in
 flight. The machine keeps working exactly as it did. You gain a web app, a Home
 Assistant integration, and a cycle runner you can program.
 
-Built and verified on a **Momcozy D8 DeepClean** (internal model `BW05`). The
-approach transfers to any washer whose panel talks to its controller over a
-serial link — see [`docs/protocol.md`](docs/protocol.md).
+⚠️ **All of this was developed on exactly one machine: a Momcozy D8 DeepClean
+(internal model `BW05`, controller board `BBW04001-UL-P`).** Nothing here has
+been tested on any other washer, including other Momcozy models. It should work
+on a machine carrying the same controller board, and the *method* generalises to
+any panel-link washer — but the pin map, the bit meanings and the cycle programs
+are this board's, and none of them are guaranteed to carry over.
 
 <p align="center">
   <img src="docs/diagrams/architecture.svg" width="880"
@@ -80,14 +83,27 @@ can hurt the machine while you confirm the wiring.
 
 ## Does it fit my machine?
 
-You need a washer where a **separate front panel** talks to a **controller board**
-over a few wires. Look for a 4-pin connector carrying ground, +5 V and two signal
-lines.
+**Honest answer: only a Momcozy D8 is known to work.** One machine, one board.
 
-If yours is a different model, [`docs/protocol.md`](docs/protocol.md) describes
-the frame format, and `POST /api/detect` finds the pin map for you without ever
-driving a line. A capture from a machine that is not a D8 is very welcome — open
-an issue.
+The closer yours is, the better your odds:
+
+| | |
+|---|---|
+| **Same controller board** — `BBW04001-UL-P` | should work as-is. Check the silkscreen before you buy anything |
+| Another Momcozy, different board | the firmware will likely decode the link, but expect different bit meanings. Treat every load bit as unknown until you have watched it act |
+| Any other washer with a separate panel | the *approach* applies — tap the panel link, decode it, forward it. Everything past that is your own work |
+
+What you need at minimum is a washer where a **separate front panel** talks to a
+**controller board** over a few wires — look for a 4-pin connector carrying
+ground, +5 V and two signal lines.
+
+[`docs/protocol.md`](docs/protocol.md) describes the frame format so you can tell
+quickly whether yours is the same protocol, and `POST /api/detect` finds the pin
+map for you without ever driving a line. **Start in LISTEN mode and confirm what
+each bit does on your own machine before trusting any of it.**
+
+A capture from a machine that is not a D8 is genuinely useful — open an issue with
+the frame dump from `/api/frames` and the board part number.
 
 ## Licence
 

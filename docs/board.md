@@ -6,6 +6,9 @@ are adapting this to a different washer, or tracing a fault.
 
 ⚠️ Everything here assumes the machine is **unplugged**. See [safety.md](safety.md).
 
+⚠️ This is a teardown of **one unit**. Part numbers and connector positions may
+differ even between D8 production runs — the board here is dated `20250805`.
+
 ## Machine
 
 | Field | Value |
