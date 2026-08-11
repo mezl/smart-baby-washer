@@ -77,7 +77,7 @@
 
 
 
-<text class="mono" x="610" y="500" text-anchor="middle" fill="#57606a" style="font-size:12px">BSS138 4-channel &#8212; HV faces the machine, LV the ESP32</text>
+<text class="mono" x="590" y="500" text-anchor="middle" fill="#57606a" style="font-size:12px">BSS138 4-channel &#8212; HV left, LV right</text>
 <text class="wsilk" x="456" y="180" text-anchor="end" style="fill:#8ab4f8">ch4</text>
 <text class="wsilk" x="456" y="234" text-anchor="end" style="fill:#8ab4f8">ch3</text>
 <text class="wsilk" x="456" y="394" text-anchor="end" style="fill:#8ab4f8">ch2</text>
@@ -93,28 +93,28 @@
 <text class="tiny" x="860" y="668">XIAO ESP32-C3 artwork &#169; Seeed Studio</text>
 
 <!-- ============ SIGNAL WIRES ============ -->
-<path class="toesp" marker-end="url(#ab)" d="M282,660 L412,660 L412,443 L481,443"/>
-<path class="toesp" marker-end="url(#ab)" d="M739,443 L808,443 L808,294 L866,294"/>
-<path class="fresp" marker-end="url(#ag)" d="M481,389 L388,389 L388,695 L284,695"/>
-<path class="fresp" marker-end="url(#ag)" d="M866,342 L826,342 L826,389 L739,389"/>
-<path class="fresp" marker-end="url(#ag)" d="M481,229 L340,229 L340,190 L284,190"/>
-<path class="fresp" marker-end="url(#ag)" d="M866,390 L844,390 L844,229 L739,229"/>
-<path class="toesp" marker-end="url(#ab)" d="M282,225 L364,225 L364,175 L481,175"/>
-<path class="toesp" marker-end="url(#ab)" d="M739,175 L790,175 L790,438 L866,438"/>
+<path class="toesp" marker-end="url(#ab)" d="M282,660 L412,660 L412,443 L495,443"/>
+<path class="toesp" marker-end="url(#ab)" d="M725,443 L808,443 L808,294 L866,294"/>
+<path class="fresp" marker-end="url(#ag)" d="M495,389 L388,389 L388,695 L284,695"/>
+<path class="fresp" marker-end="url(#ag)" d="M866,342 L826,342 L826,389 L725,389"/>
+<path class="fresp" marker-end="url(#ag)" d="M495,229 L340,229 L340,190 L284,190"/>
+<path class="fresp" marker-end="url(#ag)" d="M866,390 L844,390 L844,229 L725,229"/>
+<path class="toesp" marker-end="url(#ab)" d="M282,225 L364,225 L364,175 L495,175"/>
+<path class="toesp" marker-end="url(#ab)" d="M725,175 L790,175 L790,438 L866,438"/>
 <text class="tiny" x="300" y="182">ch3 &#183; ESP &#8594; panel</text>
 <text class="tiny" x="300" y="217">ch4 &#183; panel &#8594; ESP</text>
 <text class="tiny" x="300" y="652">ch1 &#183; controller &#8594; ESP</text>
 <text class="tiny" x="300" y="687">ch2 &#183; ESP &#8594; controller</text>
 
 <!-- ============ POWER ============ -->
-<path class="p5" d="M282,288 L310,288 L310,758 L282,758 M310,336 L481,336
-                    M350,112 L1450,112 L1450,246 L1429,246 M350,288 L350,112"/>
+<path class="p5" d="M282,288 L310,288 M282,758 L310,758 M310,112 L310,758
+                    M310,336 L495,336 M310,112 L1450,112 L1450,246 L1429,246"/>
 <text class="mono" x="330" y="800" fill="#d0021b">+5V &#8212; controller pin 4 = panel pin 4 = converter HV = XIAO 5V, one net</text>
 <text class="mono" x="1000" y="106" fill="#d0021b">+5V &#8594; XIAO 5V</text>
-<path class="p3" d="M739,336 L756,336 L756,880 L1462,880 L1462,342 L1429,342"/>
+<path class="p3" d="M725,336 L756,336 L756,880 L1462,880 L1462,342 L1429,342"/>
 <text class="mono" x="760" y="874" fill="#d98324">XIAO 3V3 &#8594; converter LV</text>
-<path class="gn" d="M282,258 L296,258 L296,910 M296,282 L481,282
-                    M739,282 L772,282 L772,910 M320,910 L1476,910 L1476,294 L1429,294
+<path class="gn" d="M282,258 L296,258 L296,910 M296,282 L495,282
+                    M725,282 L772,282 L772,910 M296,910 L1476,910 L1476,294 L1429,294
                     M282,728 L296,728"/>
 <text class="mono" x="340" y="904">GND &#8212; CN2 pin 3, panel pin 3, converter GND (both), XIAO GND all common</text>
 
