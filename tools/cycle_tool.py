@@ -24,7 +24,7 @@ because the two are expected to disagree.
 """
 import argparse, json, sys, urllib.parse, urllib.request
 
-DEF_HOST = "d8-sniffer.local"
+DEF_HOST = "baby-washer.local"
 SLOTS = 6
 
 # Keep in step with KW[] in firmware/src/cn2.cpp.

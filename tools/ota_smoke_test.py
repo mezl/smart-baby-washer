@@ -9,7 +9,7 @@ board is going to live inside an appliance.
     python3 tools/ota_smoke_test.py --no-upload    # reachability + auth only
 
 Env:
-    D8_HOST         default "d8-sniffer.local"
+    WASHER_HOST         default "baby-washer.local"
     OTA_PASSWORD    required — must match include/secrets.h
 """
 import argparse
@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-HOST = os.environ.get("D8_HOST", "d8-sniffer.local")
+HOST = os.environ.get("WASHER_HOST", "baby-washer.local")
 KEY = os.environ.get("OTA_PASSWORD", "change-me")
 BASE = f"http://{HOST}"
 

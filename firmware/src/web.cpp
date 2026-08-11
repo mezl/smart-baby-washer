@@ -1702,7 +1702,7 @@ void begin() {
 
   // ---- Second OTA path -----------------------------------------------------
   //   curl -f -F "firmware=@.pio/build/c3/firmware.bin" \
-  //        "http://d8-sniffer.local/update?key=$OTA_PASSWORD"
+  //        "http://baby-washer.local/update?key=$OTA_PASSWORD"
   // Unlike espota this needs no reverse connection back to the uploading host,
   // so it survives the subnet boundary and anything that only allows outbound
   // TCP. Two independent ways in is the whole point.

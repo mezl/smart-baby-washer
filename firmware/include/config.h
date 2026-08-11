@@ -10,7 +10,7 @@
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
 // the OTA uploader follow the board instead of an address that moves.
-#define OTA_HOSTNAME              "d8-sniffer"
+#define OTA_HOSTNAME              "baby-washer"
 #define OTA_PORT                  3232
 
 #define WIFI_CONNECT_TIMEOUT_MS   20000UL   // stop *blocking* after this...

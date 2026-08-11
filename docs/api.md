@@ -3,7 +3,7 @@
 Everything the web UI does, it does through these. There is no state the page
 holds that the device does not.
 
-Base URL is the device: `http://d8-sniffer.local/` or its IP. `GET` returns JSON;
+Base URL is the device: `http://baby-washer.local/` or its IP. `GET` returns JSON;
 `POST` takes query-string arguments, never a body, and returns `{"ok":true,...}`.
 
 **Hex arguments are hex without `0x`.** `clr=42` means `0x42`. The exceptions are
@@ -348,7 +348,7 @@ machine checks none of those.
 
 ```
 curl -f -F "firmware=@.pio/build/c3/firmware.bin" \
-     "http://d8-sniffer.local/update?key=$OTA_PASSWORD"
+     "http://baby-washer.local/update?key=$OTA_PASSWORD"
 ```
 
 Needs no reverse connection back to the uploading host, unlike espota. See

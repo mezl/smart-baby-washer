@@ -20,7 +20,7 @@
 # One poll, many entities.
 # ---------------------------------------------------------------------------
 rest:
-  - resource: http://d8-sniffer.local/api/app
+  - resource: http://baby-washer.local/api/app
     scan_interval: 5
     timeout: 4
     sensor:
@@ -104,19 +104,19 @@ rest:
 # ---------------------------------------------------------------------------
 rest_command:
   d8_start:
-    url: "http://d8-sniffer.local/api/cycle?run=start"
+    url: "http://baby-washer.local/api/cycle?run=start"
     method: POST
   d8_stop:
-    url: "http://d8-sniffer.local/api/cycle?run=stop"
+    url: "http://baby-washer.local/api/cycle?run=stop"
     method: POST
   d8_resume:
-    url: "http://d8-sniffer.local/api/cycle?run=resume"
+    url: "http://baby-washer.local/api/cycle?run=resume"
     method: POST
   d8_set_program:
-    url: "http://d8-sniffer.local/api/cycle?mode={{ mode }}"
+    url: "http://baby-washer.local/api/cycle?mode={{ mode }}"
     method: POST
   d8_set_temps:
-    url: "http://d8-sniffer.local/api/cycle?water={{ water }}&dry={{ dry }}"
+    url: "http://baby-washer.local/api/cycle?water={{ water }}&dry={{ dry }}"
     method: POST
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ with no Arduino dependency, so it runs on a host at 100 % line and branch
 coverage. `src/cn2.cpp` calls into that same header, which is what stops the tests
 drifting into a parallel copy of the logic.
 
-Then open `http://d8-sniffer.local/` — the user app — or `/dev` for the
+Then open `http://baby-washer.local/` — the user app — or `/dev` for the
 engineering page.
 
 ⚠️ **Start in LISTEN mode.** It cannot drive a CN2 line at all. See

@@ -4,8 +4,8 @@ Three ways in, all over plain HTTP on your own network. No cloud, no account.
 
 | | |
 |---|---|
-| `http://d8-sniffer.local/` | **The app.** Pick a program, start it, watch progress. Nothing on it can force a load. This is the one to use day to day. |
-| `http://d8-sniffer.local/dev` | **Engineering page.** Everything below. It drives 120 V heaters and a water pump directly. |
+| `http://baby-washer.local/` | **The app.** Pick a program, start it, watch progress. Nothing on it can force a load. This is the one to use day to day. |
+| `http://baby-washer.local/dev` | **Engineering page.** Everything below. It drives 120 V heaters and a water pump directly. |
 | **Home Assistant** | entities, commands and a dashboard — see [`homeassistant/`](../homeassistant/) |
 
 Programs, custom cycles and the stage syntax are in [cycles.md](cycles.md);
@@ -234,6 +234,6 @@ Every control here is an HTTP endpoint, documented in [api.md](api.md). The UI i
 a client, not a privileged one.
 
 ```bash
-curl -X POST 'http://d8-sniffer.local/api/wsrelay?mode=auto'
-curl -s     'http://d8-sniffer.local/api/status' | jq .wsr_why
+curl -X POST 'http://baby-washer.local/api/wsrelay?mode=auto'
+curl -s     'http://baby-washer.local/api/status' | jq .wsr_why
 ```

@@ -8,7 +8,7 @@ record of a cycle, it has to be captured from the host while the cycle runs.
 
     python3 cycle_log.py                        # logs until Ctrl-C
     python3 cycle_log.py --out mycycle.jsonl
-    python3 cycle_log.py --host d8-sniffer.local --hz 5
+    python3 cycle_log.py --host baby-washer.local --hz 5
 
 Writes two files side by side:
 
@@ -106,7 +106,7 @@ def compact(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="d8-sniffer.local")
+    ap.add_argument("--host", default="baby-washer.local")
     ap.add_argument("--hz", type=float, default=5.0)
     ap.add_argument("--out", default=None)
     ap.add_argument("--refresh", type=float, default=1.0,

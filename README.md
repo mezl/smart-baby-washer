@@ -66,7 +66,7 @@ cd firmware
 pio run -e c3 -t upload
 ```
 
-Open `http://d8-sniffer.local/`.
+Open `http://baby-washer.local/`.
 
 **Start in LISTEN mode** — it physically cannot drive a line, so nothing you do
 can hurt the machine while you confirm the wiring.

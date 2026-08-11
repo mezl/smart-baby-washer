@@ -9,7 +9,7 @@ pio run -e c3 -t upload          # over USB
 pio test -e native               # optional: 45 host-side tests
 ```
 
-Open `http://d8-sniffer.local/`. If `.local` does not resolve on your network,
+Open `http://baby-washer.local/`. If `.local` does not resolve on your network,
 find the board's IP with `/api/version` or scan the subnet.
 
 **Leave it in LISTEN mode until the wiring is confirmed** — see
@@ -22,12 +22,12 @@ Once the board is sealed inside the machine, USB means disassembly. Two paths:
 ```bash
 # espota — needs a reverse connection back to your machine
 OTA_PASSWORD=... pio run -e c3_ota -t upload                 # by mDNS
-D8_SNIFFER_IP=<board-ip> OTA_PASSWORD=... \
+WASHER_IP=<board-ip> OTA_PASSWORD=... \
     pio run -e c3_ota_ip -t upload                           # by IP
 
 # plain HTTP — needs only outbound TCP, so it crosses subnets and firewalls
 curl -f -F "firmware=@.pio/build/c3/firmware.bin" \
-     "http://d8-sniffer.local/update?key=$OTA_PASSWORD"
+     "http://baby-washer.local/update?key=$OTA_PASSWORD"
 ```
 
 The HTTP path exists because `espota` has the board connect *back* to your
