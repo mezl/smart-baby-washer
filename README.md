@@ -58,6 +58,10 @@ Four wires cut into the panel link, through a level shifter, into the ESP32.
 Power and ground stay connected straight through, so the panel never loses its
 supply.
 
+⚠️ Note the shifter's real pad order — with **HV facing the machine, the channels
+run 4·3·2·1 down the board**, not 1·2·3·4. Wire to the silkscreen, not to where
+you expect the numbers to be.
+
 <p align="center">
   <img src="docs/diagrams/wiring-as-built.svg" width="1000"
        alt="As-built wiring: the controller and front panel connected through all four channels of a BSS138 level converter to a XIAO ESP32-C3, with power and ground passing straight through.">
