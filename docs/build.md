@@ -89,12 +89,33 @@ It never transmits.
 **This is the step that makes the next one safe.** Connecting an ESP32 transmit
 pin to something that is also an output is the way to damage a board.
 
-## 4. Cut over to RELAY
+## 4. Go inline
 
-Now cut **CN2 pins 1 and 2 only** and bring all four stubs to the ESP32.
+Two ways to get the ESP32 into the link. **Prefer the first — it cuts nothing.**
 
-⚠️ **Leave pins 3 and 4 connected panel↔controller.** The panel is powered through
-them; cut all four and it goes dead.
+### A. Inline adapter (reversible)
+
+`CN2` is a plug-in connector, so the module can sit **in** the cable:
+
+```
+controller  ──► [ J1  module  J2 ] ──►  panel
+```
+
+You need a 4-pin JST-XH **male** header toward the controller and a **socket**
+for the panel's existing cable. The carrier board in
+[`hardware/pcb/`](../hardware/pcb/) is exactly this — `J1` to the controller,
+`J2` to the panel, with pins 3 and 4 passing straight through on the copper.
+
+Unplug it later and the machine is stock. Nothing is cut, nothing is soldered to
+the OEM board.
+
+### B. Cut and splice
+
+If you cannot source the connectors, cut **CN2 pins 1 and 2 only** and bring all
+four stubs to the ESP32. Still reversible with a solder joint, but not as neatly.
+
+⚠️ **Either way, leave pins 3 and 4 connected panel↔controller.** The panel is
+powered through them; break all four and it goes dead.
 
 <p align="center">
   <img src="diagrams/wiring-as-built.svg" width="1000"
@@ -121,6 +142,10 @@ pads and XIAO `GND` all common.
 
 Two properties make the wiring hard to get wrong: **channel N carries pin DN**,
 and **the HV side groups by device** — ch1/ch2 controller, ch3/ch4 panel.
+
+⚠️ Wire to the shifter's **printed pad names**. Rotated so HV faces the machine,
+its pads read `HV4 · HV3 · GND · HV · HV2 · HV1` down the board — not 1 to 4. The
+photo inset in the diagram shows it.
 
 ## Pin choice, if you deviate
 

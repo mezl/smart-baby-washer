@@ -113,7 +113,7 @@ on `GPIO10`, and the SW1 simulator is gone — `/api/sim` accepts `sw=2` only.
 | 3 | J2 PANEL pin 1 — RX, input | ← | `HV3` · `LV3` | `D3 / GPIO5` | `Serial1` **TX** |
 | 4 | J2 PANEL pin 2 — TX, output | → | `HV4` · `LV4` | `D4 / GPIO6` | `Serial1` **RX** |
 
-Identical to [`docs/wiring.md`](../../docs/build.md#4-cut-over-to-relay) and to
+Identical to [`docs/wiring.md`](../../docs/build.md#4-go-inline) and to
 `firmware/include/config.h`, so a board built from this needs no firmware change.
 
 Power: controller pin 4 = panel pin 4 = converter `HV` = XIAO `5V`, one net.

@@ -1,51 +1,75 @@
-# Smart Baby Washer
+<h1 align="center">Smart Baby Washer</h1>
 
-Make a dumb baby-bottle washer app-controlled — without replacing its brain.
+<p align="center">
+  <b>Turn a dumb baby-bottle washer into a smart one — without modifying it.</b>
+</p>
 
-A **Seeed XIAO ESP32-C3** sits in the middle of the ribbon between the front panel
-and the controller board, forwards every byte, and can rewrite any of them in
-flight. The machine keeps working exactly as it did. You gain a web app, a Home
-Assistant integration, and a cycle runner you can program.
+<p align="center">
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Platform ESP32-C3" src="https://img.shields.io/badge/platform-ESP32--C3-black">
+  <img alt="Home Assistant native" src="https://img.shields.io/badge/Home%20Assistant-native-41BDF5">
+  <img alt="No cloud" src="https://img.shields.io/badge/cloud-none-brightgreen">
+  <img alt="Reversible install" src="https://img.shields.io/badge/install-reversible-success">
+</p>
 
-⚠️ **All of this was developed on exactly one machine: a Momcozy D8 DeepClean
-(internal model `BW05`, controller board `BBW04001-UL-P`).** Nothing here has
-been tested on any other washer, including other Momcozy models. It should work
-on a machine carrying the same controller board, and the *method* generalises to
-any panel-link washer — but the pin map, the bit meanings and the cycle programs
-are this board's, and none of them are guaranteed to carry over.
+An **ESP32-C3 sits in the cable** between the washer's front panel and its
+controller board. It reads every frame in both directions and can rewrite any of
+them, so the machine behaves exactly as it always did — and gains a phone app,
+Home Assistant, and cycles you can program yourself.
+
+### ✅ Nothing is cut, nothing is soldered to the machine
+
+The module plugs **inline** on the existing panel connector: controller on one
+side, panel on the other, power and ground passing straight through. Unplug it
+and the washer is stock again. No OEM firmware is replaced, no relay is spliced,
+no warranty sticker is disturbed.
 
 <p align="center">
   <img src="docs/diagrams/architecture.svg" width="880"
        alt="The ESP32-C3 sits on the CN2 UART between the main board and the front panel, and bridges to Home Assistant over WiFi.">
 </p>
 
-> ⚠️ **This drives 120 V heaters and a water pump directly.** The machine's own
-> controller will not stop you. Read [`docs/safety.md`](docs/safety.md) before you
-> open anything.
+## What your washer gains
 
-## What you get
+| Stock machine | With this |
+|---|---|
+| Walk to it, press a button | **Start, stop and resume from your phone** or Home Assistant |
+| Six fixed programs | Six built-ins **plus six of your own**, every stage editable |
+| A countdown you have to trust | **Live temperature, water flow, stage and lid** — second by second |
+| No idea when it finishes | **Notifications** on finish, pause and fault |
+| A two-character error code | The code **in plain English**, with what triggers it |
+| No history | Temperature and flow **graphs**, and a full cycle log |
+| Nothing stops a dry heater | Interlocks the machine lacks — **no heater without a verified fill** |
 
 <p align="center">
   <img src="docs/images/webui/app-phone.png" width="300"
        alt="The app on a phone: state and water temperature, a grid of wash programs with one selected, a START button and the stage list.">
+  &nbsp;&nbsp;
+  <img src="docs/images/diy-module.jpg" width="440"
+       alt="The finished module inside the machine: a XIAO ESP32-C3 on a scrap of perfboard with a 4-pin lead to the panel link and an external antenna.">
 </p>
+
+Everything is **local** — the app is served by the ESP32 itself and Home Assistant
+talks to it over plain HTTP. No cloud, no account, no vendor app.
 
 <p align="center">
   <img src="docs/images/webui/overview.png" width="880"
        alt="The engineering web page: machine state, wash pump relay, decoded frames, cycle runner, error codes, lid status, and temperature and flow graphs.">
 </p>
 
-- **A web app** on the ESP32 — pick a program, start it, watch temperature and
-  progress. Mobile-sized. No cloud, no account.
-- **Home Assistant** — entities, commands and a dashboard over plain HTTP. No
-  MQTT broker, no custom component.
-- **A programmable cycle runner** — six built-in programs plus six of your own,
-  with per-stage durations you can edit. It carries interlocks the machine does
-  not: no heater without a verified fill, and pause-not-abort on lid open or no
-  water.
-- **Full visibility** — live decode of both directions of the panel link,
-  temperature and flow graphs, and the machine's real error codes with plain
-  English next to them.
+The engineering page above is the other half: a live decode of the panel link in
+both directions, per-bit load control, fault injection, and a virtual-controller
+mode that runs a whole cycle with nothing energised.
+
+> ⚠️ **It can also drive 120 V heaters and a water pump directly, and the
+> machine's own controller will not stop you.** Read
+> [`docs/safety.md`](docs/safety.md) before you open anything.
+
+⚠️ **Developed on exactly one machine** — a Momcozy D8 DeepClean (`BW05`,
+controller board `BBW04001-UL-P`). It should work on any washer carrying the same
+board, and the method generalises to any panel-link washer, but the pin map and
+bit meanings are this board's. See
+[does it fit my machine?](#does-it-fit-my-machine)
 
 <p align="center">
   <img src="docs/diagrams/cycle-timeline.svg" width="880"

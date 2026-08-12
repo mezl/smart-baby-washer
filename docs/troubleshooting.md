@@ -15,7 +15,7 @@ announces itself within seconds.
 | ch3 | D3/GPIO5 → LV3·HV3 → panel pin 1 | out of ESP | **no E5 on the panel display** |
 | ch4 | panel pin 2 → HV4·LV4 → D4/GPIO6 | into ESP | `panel→ESP` counter climbing, **0 bad** |
 
-Channels come from [wiring.md](build.md#4-cut-over-to-relay); if you
+Channels come from [wiring.md](build.md#4-go-inline); if you
 wired it differently, `POST /api/detect` tells you what you actually have.
 
 The two RX paths prove themselves — every frame ends in an XOR, so a corrupted byte
