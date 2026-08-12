@@ -42,11 +42,8 @@ no warranty sticker is disturbed.
 | Nothing stops a dry heater | Interlocks the machine lacks — **no heater without a verified fill** |
 
 <p align="center">
-  <img src="docs/images/webui/app-phone.png" width="300"
+  <img src="docs/images/webui/app-phone.png" width="320"
        alt="The app on a phone: state and water temperature, a grid of wash programs with one selected, a START button and the stage list.">
-  &nbsp;&nbsp;
-  <img src="docs/images/diy-module.jpg" width="440"
-       alt="The finished module inside the machine: a XIAO ESP32-C3 on a scrap of perfboard with a 4-pin lead to the panel link and an external antenna.">
 </p>
 
 Everything is **local** — the app is served by the ESP32 itself and Home Assistant
