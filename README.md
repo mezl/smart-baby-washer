@@ -41,7 +41,10 @@
   fault bit or dead link.
 - **Live link decode**, both directions, raw and rewritten, with 30 min of
   temperature and 60 s of flow history.
-- **Error codes** with the manual's text, and injection of each confirmed one.
+- **Diagnostics** — drive each load on its own (drain, water heater, air heater,
+  blower, intake, wash pump) and inject error codes to see how the panel reacts:
+  `E0` `E3` `E4` `E5` `E7` confirmed, `E1` and `E6` have no bit. Virtual-controller
+  mode runs a whole cycle with nothing energised.
 - **Cycle logging** host-side via `tools/cycle_log.py`. Nothing is stored on the
   ESP32; it holds ~63 s of traffic in RAM.
 - Runs entirely on your own network — no cloud, no account.
