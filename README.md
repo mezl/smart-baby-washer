@@ -32,27 +32,19 @@
 
 ## What it does
 
-- **Web app** on the ESP32 — select a program, start/stop/resume, watch state,
-  water temperature and stage.
-- **HTTP API** for all of it, plus the decoded link state.
-- **Home Assistant** — sensors, buttons, dashboard, notifications on finish,
-  pause and fault. Plain REST; no MQTT, no custom component.
-- **Cycle runner** — six programs from the manual plus six user slots. Stage
-  durations and temperature targets persist. Fills end on flow count, not a timer.
-- **Custom programs** — fixed-width stage syntax, edited in the browser or as JSON
-  via `tools/cycle_tool.py`, validated before they are accepted.
-- **Interlocks the machine lacks** — no heater without a verified fill; lid-open
-  and no-water pause instead of abort; abort on over temperature, fill stall,
-  fault bit or dead link.
-- **Live link decode**, both directions, raw and rewritten, with 30 min of
-  temperature and 60 s of flow history.
-- **Diagnostics** — drive each load on its own (drain, water heater, air heater,
-  blower, intake, wash pump) and inject error codes to see how the panel reacts:
-  `E0` `E3` `E4` `E5` `E7` confirmed, `E1` and `E6` have no bit. Virtual-controller
-  mode runs a whole cycle with nothing energised.
-- **Cycle logging** host-side via `tools/cycle_log.py`. Nothing is stored on the
-  ESP32; it holds ~63 s of traffic in RAM.
-- Runs entirely on your own network — no cloud, no account.
+- **Web app + HTTP API** — pick a program, start/stop/resume, watch state,
+  temperature and stage.
+- **Home Assistant** — sensors, buttons, dashboard, notifications. Plain REST; no
+  MQTT, no custom component.
+- **Cycle runner** — six stock programs plus six of your own; durations and
+  temperature targets persist; fills end on flow count, not a timer.
+- **Interlocks the machine lacks** — no heater without a verified fill; pause on
+  lid-open or no water; abort on over temperature, fill stall, fault bit or dead link.
+- **Diagnostics** — drive each load on its own, inject `E0` `E3` `E4` `E5` `E7`
+  (`E1`/`E6` have no bit), or run a whole cycle with nothing energised.
+- **Live link decode** both directions, raw and rewritten, with temperature and
+  flow graphs.
+- Local only, no cloud. Logging is host-side; the ESP32 stores nothing.
 
 <p align="center">
   <img src="docs/images/webui/app-phone.png" width="320"
