@@ -1,7 +1,8 @@
 <h1 align="center">Smart Baby Washer</h1>
 
 <p align="center">
-  <b>Turn a dumb baby-bottle washer into a smart one — without modifying it.</b>
+  <b>App and Home Assistant control for a baby-bottle washer, from an ESP32-C3
+  that plugs inline on the panel cable.</b>
 </p>
 
 <p align="center">
@@ -12,42 +13,52 @@
   <img alt="Reversible install" src="https://img.shields.io/badge/install-reversible-success">
 </p>
 
-An **ESP32-C3 sits in the cable** between the washer's front panel and its
-controller board. It reads every frame in both directions and can rewrite any of
-them, so the machine behaves exactly as it always did — and gains a phone app,
-Home Assistant, and cycles you can program yourself.
+The ESP32-C3 sits between the washer's front panel and its controller board on
+the 4-pin serial link between them. It forwards every frame in both directions
+and can rewrite any byte in flight, so the panel and controller carry on working
+as before.
 
-### ✅ Nothing is cut, nothing is soldered to the machine
-
-The module plugs **inline** on the existing panel connector: controller on one
-side, panel on the other, power and ground passing straight through. Unplug it
-and the washer is stock again. No OEM firmware is replaced, no relay is spliced,
-no warranty sticker is disturbed.
+**The install is reversible.** `CN2` is a plug-in connector, so the module goes
+inline on the existing cable — controller one side, panel the other, with ground
+and +5 V passing straight through. Nothing is cut and nothing is soldered to the
+OEM board. No OEM firmware is replaced.
 
 <p align="center">
   <img src="docs/diagrams/architecture.svg" width="880"
        alt="The ESP32-C3 sits on the CN2 UART between the main board and the front panel, and bridges to Home Assistant over WiFi.">
 </p>
 
-## What your washer gains
+## What it does
 
-| Stock machine | With this |
-|---|---|
-| Walk to it, press a button | **Start, stop and resume from your phone** or Home Assistant |
-| Six fixed programs | Six built-ins **plus six of your own**, every stage editable |
-| A countdown you have to trust | **Live temperature, water flow, stage and lid** — second by second |
-| No idea when it finishes | **Notifications** on finish, pause and fault |
-| A two-character error code | The code **in plain English**, with what triggers it |
-| No history | Temperature and flow **graphs**, and a full cycle log |
-| Nothing stops a dry heater | Interlocks the machine lacks — **no heater without a verified fill** |
+- **Web app** served by the ESP32 — select a program, start, stop, resume, and
+  watch state, water temperature and stage progress.
+- **HTTP API** for every one of those controls, plus the full decoded link state.
+- **Home Assistant** — sensors for state, program, stage, water temperature, flow
+  count, lid and error code; buttons for start/stop/resume; a dashboard;
+  notifications on finish, pause and fault. Plain REST, no MQTT broker and no
+  custom component.
+- **Cycle runner** — the six programs from the manual plus six user slots. Stage
+  durations and water/dry temperature targets are editable and persist across
+  reboots. Fills end on the flow count rather than a timer.
+- **Custom programs** — a fixed-width stage syntax, editable in the browser or as
+  a JSON file via `tools/cycle_tool.py`. Validated before they are accepted.
+- **Interlocks the machine does not have** — no heater stage without a verified
+  fill; lid-open and no-water *pause* rather than abort; abort on over
+  temperature, fill stall, a controller fault bit or a dead link.
+- **Live decode of the panel link** in both directions, raw and as rewritten, with
+  30 minutes of temperature and 60 seconds of flow history in the browser.
+- **The machine's error codes** with the manual's text beside them, and a way to
+  inject each confirmed one for testing.
+- **Cycle logging** to a host with `tools/cycle_log.py`. Nothing is stored on the
+  ESP32 — it keeps about 63 seconds of traffic in RAM and loses it on reboot.
+
+Everything runs on your own network. The app is served by the ESP32 and Home
+Assistant talks to it over plain HTTP — no cloud service and no account.
 
 <p align="center">
   <img src="docs/images/webui/app-phone.png" width="320"
        alt="The app on a phone: state and water temperature, a grid of wash programs with one selected, a START button and the stage list.">
 </p>
-
-Everything is **local** — the app is served by the ESP32 itself and Home Assistant
-talks to it over plain HTTP. No cloud, no account, no vendor app.
 
 <p align="center">
   <img src="docs/images/webui/overview.png" width="880"
