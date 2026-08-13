@@ -13,6 +13,11 @@
   <img alt="Reversible install" src="https://img.shields.io/badge/install-reversible-success">
 </p>
 
+<p align="center">
+  <img src="docs/images/machine.jpg" width="460"
+       alt="A Momcozy D8 bottle washer on a kitchen counter, front panel lit, running a cycle.">
+</p>
+
 - Sits on the 4-pin serial link between the front panel and the controller board,
   forwarding every frame and rewriting any byte in flight.
 - **Reversible** — `CN2` is a plug-in connector, so the module goes inline on the
@@ -76,6 +81,14 @@
   pads read 4·3·2·1 down the board. The photo inset in the diagram shows it.
 - 💡 Fit the external antenna. Inside a metal and wet plastic appliance the
   on-board one struggles, and losing WiFi means losing OTA.
+
+<p align="center">
+  <img src="docs/images/inside.jpg" width="380"
+       alt="The washer opened up: pump, tubing and wiring loom inside the base.">
+  &nbsp;
+  <img src="docs/images/controller-board.jpg" width="440"
+       alt="The controller board out of the machine, showing the mains relays, the low-voltage connectors and the CN2 panel header.">
+</p>
 
 <p align="center">
   <img src="docs/diagrams/wiring-as-built.svg" width="1000"
