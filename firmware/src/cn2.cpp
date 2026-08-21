@@ -2034,6 +2034,7 @@ static uint8_t panelByte(uint8_t idx) {
   return frameSnapshot(FROM_PANEL, f) >= 5 ? f[idx] : 0;
 }
 uint8_t panelB1() { return panelByte(1); }
+uint8_t panelB1Fwd() { return s_panel_b1_fwd; }
 uint8_t panelB2() { return panelByte(2); }
 uint8_t panelB3() { return panelByte(3); }
 

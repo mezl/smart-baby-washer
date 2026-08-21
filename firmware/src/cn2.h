@@ -274,6 +274,10 @@ uint8_t tempFwd();
 void    pressButton(uint8_t mask, uint32_t ms);
 bool    pressActive();
 uint8_t panelB1();   // live panel frame bytes, for learning button codes
+// Byte 1 as actually FORWARDED. The UI used to predict this from pb1 and the
+// override masks, which stopped being true the moment the flush cap could
+// subtract a bit the masks know nothing about.
+uint8_t panelB1Fwd();
 uint8_t panelB2();
 uint8_t panelB3();
 // Per-direction frame checksum tally. side 0 = controller, 1 = panel.

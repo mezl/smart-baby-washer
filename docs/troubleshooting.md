@@ -190,3 +190,52 @@ check that before assuming a bad flash. If it is powered and still absent, scan 
 subnet rather than trusting mDNS; `.local` resolution has proven unreliable here.
 If an OTA reports success but the device comes back on the *old* version, the
 upload did not apply — re-flash and confirm with `/api/version`.
+
+## 8. Testing the flush cap
+
+The end-of-cycle flush is capped in firmware ([`POST /api/flushcap`](api.md)).
+Two ways to prove it works, in the order worth doing them.
+
+### Dry — no water, machine inert
+
+```bash
+python3 tools/flushcap_test.py baby-washer.local
+```
+
+**SPOOF** feeds the controller a permanently idle panel frame, so nothing the
+overrides say reaches it and no load can be energised. The masks are still
+applied to the real panel stream on the way past, and that rewritten value is
+what the cap watches — so the whole decision path runs while the machine sits
+still. The script refuses to command anything until it has confirmed spoof is
+engaged, and restores the link in a `finally`.
+
+It checks four things: a **targeted** fill is never capped however long it runs,
+an untargeted `0xFF` flush trips the cap on time, the forwarded byte 1 loses
+`INTAKE` and keeps `DRAIN`, and releasing the flush re-arms it.
+
+On the `/dev` page the same thing is visible live: while the cap holds, the
+`→ctrl` column of **DRIVE LOADS** shows `b5` as `0` with a red `*`, and the
+**FLUSH CAP** line reads `CAPPED`.
+
+### Wet — a real cycle
+
+The dry test cannot tell you the one thing only the machine knows: **whether the
+controller accepts a mid-flush intake release and moves on.** For that:
+
+1. `POST /api/flushcap?ms=20000`
+2. Start **Self-Clean** and let it run to the cool-down flush (last stage before
+   drying, ~60–115 s of drain and intake together).
+3. Watch `/api/status`: `flush_on` goes true, `flush_ms` climbs, and at 20 s
+   `flush_cap` goes true. The serial log prints `[flush] CAP at 20000 ms`.
+4. The sump temperature should stop falling and start rising within a few
+   seconds — that is the machine seeing the water stop, which is exactly what
+   ends the stage normally.
+5. Confirm the cycle advances to drying rather than sitting there.
+6. Put the cap back: `POST /api/flushcap?ms=180000`.
+
+⚠️ Capture it: `python3 tools/cycle_log.py --out logs/flushcap --hz 5`. Nothing
+is stored on the ESP32, so an uncaptured run tells you nothing afterwards.
+
+If the cycle **stalls** at step 5, the controller wants something else to end
+that stage and the cap is the wrong lever — set `ms=0`, open an issue with the
+log, and bound the water supply in hardware instead.

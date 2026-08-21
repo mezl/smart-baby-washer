@@ -1040,11 +1040,17 @@ function b1tbl(s){
  // only way left to hunt the unattributed 303.7 ohm sprayer valve.
  for(let k=5;k>=0;k--){
   const m=1<<k, pv=(s.pb1&m)?1:0;
-  const fv=(((s.pb1&~s.p1_clr)|s.p1_set)&m)?1:0;
+  // The byte the controller was actually sent. Predicting it from the override
+  // masks went wrong as soon as the flush cap could subtract a bit the masks
+  // know nothing about -- the table claimed intake was being forwarded while it
+  // was being held down.
+  const fv=(s.pb1_fwd&m)?1:0;
+  const capped=(k===5&&s.flush_cap&&(((s.pb1&~s.p1_clr)|s.p1_set)&m));
   const st=(s.p1_set&m)?'on':((s.p1_clr&m)?'off':'pass');
   h+=`<tr><td class="mono nw">b${k}</td><td class="mono nw">${h2(m)}</td>`+
      `<td class="mono c">${pv}</td>`+
-     `<td class="mono c"><b class=${fv?'ok':'mut'}>${fv}</b></td>`+
+     `<td class="mono c"><b class=${fv?'ok':'mut'}>${fv}</b>`+
+     (capped?'<span class=bad title="the flush cap is stripping this bit">*</span>':'')+`</td>`+
      `<td class=ov><button class="sm ${st=='pass'?'on':''}" onclick="b1(${k},0)">pass</button>`+
      `<button class="sm ${st=='on'?'on':''}" onclick="b1(${k},1)">ON</button>`+
      `<button class="sm ${st=='off'?'on':''}" onclick="b1(${k},2)">OFF</button></td>`+
@@ -1386,6 +1392,7 @@ static String statusJson() {
   j += ",\"st_real\":" + String(cn2::statusReal());
   j += ",\"st_fwd\":" + String(cn2::statusFwd());
   j += ",\"pb1\":" + String(cn2::panelB1());
+  j += ",\"pb1_fwd\":" + String(cn2::panelB1Fwd());
   j += ",\"pb2\":" + String(cn2::panelB2());
   j += ",\"pb3\":" + String(cn2::panelB3());
   j += ",\"mo2\":" + String(cn2::modeOvr2());
