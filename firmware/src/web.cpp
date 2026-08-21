@@ -65,7 +65,18 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
  .bad{background:#3a1414;border-color:#7a2020;color:#ffd7d7}
  .ok{color:#3fb950}.mut{color:#7d8794}.hot{color:#e8734a}
  a{color:#7d8794;font-size:12px}
+ .m,.go{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+ /* :hover latches on a touch screen, so the pressed look is driven by a class
+    the tap handler adds and removes rather than by the pointer resting there. */
+ .m.tap,.go.tap{filter:brightness(1.4)}
+ /* A hairline that fills while a command is in flight. Without it the only
+    feedback a tap gets is the next poll, up to a second later, and the natural
+    response to that is to tap again. */
+ #busy{position:fixed;left:0;top:0;height:2px;width:0;background:#3fb950;
+       transition:width .12s;z-index:9;pointer-events:none}
+ body.wait #busy{width:100%}
 </style>
+<div id=busy></div>
 <h1>MOMCOZY D8</h1>
 
 <div class=card id=hdr>
@@ -92,7 +103,20 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
 
 <script>
 const $=i=>document.getElementById(i);
-const post=u=>fetch(u,{method:'POST'}).then(tick);
+// One request at a time, with a timeout. The device runs the synchronous
+// Arduino WebServer and serves exactly one client; overlapping requests just
+// queue in the browser's socket pool, and a tap then waits behind them.
+let BUSY=0;
+async function hit(u,m){
+  if(BUSY) return null;
+  BUSY=1; const ac=new AbortController(), t=setTimeout(()=>ac.abort(),8000);
+  try{ return await fetch(u,{method:m||'GET',signal:ac.signal}) }
+  catch(e){ return null }
+  finally{ clearTimeout(t); BUSY=0 }
+}
+function post(u){ document.body.classList.add('wait');
+  return hit(u,'POST').then(()=>{document.body.classList.remove('wait');
+                                 clearTimeout(TT); return tick()}) }
 let MODE=-1, ARM=0, STATE=0;
 
 function pick(m){ if(STATE!==1) post('/api/cycle?mode='+m) }
@@ -170,8 +194,24 @@ function draw(a){
   $('errcard').className='card '+(bad?'bad':'warn');
   $('errcard').innerHTML=e;
 }
-async function tick(){ try{ draw(await (await fetch('/api/app')).json()) }catch(e){} }
-tick(); setInterval(tick,1000);
+// Self-rescheduling, so a slow round trip can never stack a second poll on top
+// of the first. A plain setInterval did, and the pile-up is what made buttons
+// stop answering until the page was reloaded.
+let TT=null;
+async function tick(){
+  clearTimeout(TT);
+  if(!document.hidden){
+    const r=await hit('/api/app');
+    if(r) try{ draw(await r.json()) }catch(e){}
+  }
+  TT=setTimeout(tick, document.hidden?4000:1000);
+}
+// A tap has to look like it landed before the device has answered.
+addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('button,.m');
+  if(b){b.classList.add('tap'); setTimeout(()=>b.classList.remove('tap'),180)}},
+  {passive:true});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick()});
+tick();
 </script>
 )HTML";
 
@@ -200,12 +240,20 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
  .box{background:#161b22;border:1px solid #2a323c;border-radius:6px;padding:3px 7px}
  .box b{color:#9cf;display:block;margin-bottom:3px;font-size:11px;letter-spacing:.06em}
  button{background:#1e2630;color:#dde;border:1px solid #38424f;padding:2px 7px;
-        cursor:pointer;border-radius:4px;margin:1px}
- button:hover{background:#26313d}
+        cursor:pointer;border-radius:4px;margin:1px;font:inherit;
+        touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+        -webkit-user-select:none;user-select:none}
+ /* Hover only where a pointer exists. On a touch screen :hover latches onto the
+    last element tapped, so a button pressed a minute ago still looks lit and
+    the one you are about to press looks the same as one that is active. */
+ @media (hover:hover){button:hover{background:#26313d}}
+ button:active,.tap{background:#36434f;border-color:#5a6b7d}
  button.on{background:#2a6;color:#021;border-color:#3c8;font-weight:600}
  button.unk{opacity:.45}
- input{background:#0a0d11;color:#dde;border:1px solid #38424f;padding:3px;width:44px;
-       border-radius:3px;text-align:center}
+ input,select{background:#0a0d11;color:#dde;border:1px solid #38424f;padding:3px;
+       border-radius:3px;text-align:center;box-sizing:border-box;font:inherit}
+ input{width:44px}
+ select{text-align:left;max-width:100%}
  pre{background:#05070a;border:1px solid #2a323c;padding:8px;overflow:auto;
      max-height:26vh;margin:0;white-space:pre;border-radius:6px;font-size:12px}
  .big{font-size:16px;font-weight:600}
@@ -231,8 +279,45 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
  .tab{display:inline-block;padding:1px 6px;margin:1px;border:1px solid #38424f;
       border-radius:3px;cursor:pointer;font-size:10px;color:#9aa4b0}
  .tab.on{background:#2a6;color:#021;border-color:#3c8;font-weight:600}
+ .tab{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+ .box{max-width:100%;box-sizing:border-box}
+ /* A hairline that fills while a command is in flight. Without it the only
+    feedback a tap gets is the next poll, up to a second later, and the natural
+    response to that is to tap again. */
+ #busy{position:fixed;left:0;top:0;height:2px;width:0;background:#3fb950;
+       transition:width .12s;z-index:9;pointer-events:none}
+ body.wait #busy{width:100%}
+ /* --- phones -----------------------------------------------------------
+    Laid out for a desktop column pack, this page gave ~18 px tap targets, and
+    the fixed min-widths on the log boxes pushed it sideways so taps landed on
+    the wrong control. Inputs under 16 px are worse than small: iOS Safari
+    zooms the page in on focus and does not zoom back out, after which every
+    tap is offset and the page reads as broken. */
+ @media (max-width:760px){
+   body{padding:6px;font-size:13px}
+   .cols,.colw,.row{display:block}
+   .box{min-width:0!important;width:auto!important;margin-bottom:6px;padding:5px 8px}
+   .row .box{flex:none!important}
+   button{padding:7px 11px;font-size:13px;min-height:34px;margin:2px 1px}
+   button.sm{padding:5px 9px;font-size:12px;min-height:30px;line-height:1.2}
+   .tab{padding:6px 10px;font-size:12px;margin:2px}
+   /* 16 px stops the zoom; the padding is what makes a stage row 70 px tall,
+      so tighten that instead of the type. */
+   input,select{font-size:16px;padding:3px 5px;min-height:30px}
+   input{width:56px}
+   .cols input{width:54px}
+   #cusn{width:auto;min-width:110px;text-align:left}
+   /* Title and status on separate lines -- together they wrap into two ragged
+      rows and the first thing on the page is a wall of numbers. */
+   h1 #hdr{display:block;font-size:11px;margin-top:2px}
+   .bitb{height:24px;line-height:24px}
+   .bitl{font-size:8px}
+   pre{font-size:11px;max-height:40vh}
+   h1{font-size:14px}
+ }
 </style>
 <h1>Momcozy D8 &mdash; CN2 <span class=lbl>v)HTML" FW_VERSION R"HTML(</span> <span id=hdr class=mut></span></h1>
+<div id=busy></div>
 
 <div class=cols id=cols>
   <div class=box><b>MACHINE</b>
@@ -440,14 +525,56 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
 
 <script>
 const $=i=>document.getElementById(i); let frozen=false;
-const post=u=>fetch(u,{method:'POST'}).then(tick);
+// ---- request pipeline ------------------------------------------------------
+// The device runs the synchronous Arduino WebServer: one client, one request at
+// a time. This page used to fire a 1 Hz setInterval with no re-entrancy guard,
+// and each tick made five to seven sequential fetches. On a phone a tick takes
+// longer than a second, so ticks overlapped, the browser's six sockets per host
+// filled with requests the device had not reached yet, and a button POST queued
+// behind all of them -- which is why a tap did nothing until a reload dropped
+// the backlog. Everything now goes through one queue: one request in flight,
+// commands jump the line, and a timeout stops a dropped connection wedging the
+// slot forever.
+let Q=[], QBUSY=0;
+function req(url,method,prio,kind){
+  return new Promise((res,rej)=>{
+    const j={url,m:method||'GET',k:kind||null,res,rej};
+    if(prio) Q.unshift(j); else Q.push(j);
+    if(Q.length>16){ Q.splice(16).forEach(x=>x.rej(new Error('dropped'))) }
+    pump();
+  });
+}
+async function pump(){
+  if(QBUSY) return;
+  const j=Q.shift(); if(!j) return;
+  QBUSY=1;
+  const ac=new AbortController(), t=setTimeout(()=>ac.abort(),8000);
+  try{
+    const r=await fetch(j.url,{method:j.m,signal:ac.signal});
+    j.res(j.k==='json'?await r.json():j.k==='text'?await r.text():r);
+  }catch(e){ j.rej(e) }
+  finally{ clearTimeout(t); QBUSY=0; if(Q.length) pump() }
+}
+const gj=u=>req(u,'GET',0,'json');
+const gt=u=>req(u,'GET',0,'text');
+// A command is what the user is waiting on, so it goes to the front, shows the
+// progress hairline, and pulls the next poll forward instead of adding one.
+function post(u){
+  document.body.classList.add('wait');
+  return req(u,'POST',1).catch(()=>{})
+    .then(()=>{document.body.classList.remove('wait'); return kick()});
+}
+// A tap has to look like it landed before the device has answered.
+addEventListener('pointerdown',e=>{const b=e.target.closest&&e.target.closest('button,.tab');
+  if(b){b.classList.add('tap'); setTimeout(()=>b.classList.remove('tap'),180)}},
+  {passive:true});
 // The panel-button machinery that lived here is gone. It invited you to learn a
 // hex "code" per button, which cannot exist: pressing all eight buttons produces
 // ZERO bytes on the wire, and byte 1 is a load bitmap, not a button map. Use the
 // DRIVE LOADS table to drive them directly.
 function probe(){const on=$('bprobe').classList.contains('on');
  post('/api/probe?v='+(on?'off':'on'))}
-function frz(){frozen=!frozen;tick()}
+function frz(){frozen=!frozen;kick()}
 function flow(){const on=$('bflow').classList.contains('on');post('/api/flow?hz='+(on?0:($('hz').value|0)))}
 function wsr(m){post('/api/wsrelay?mode='+m);}
 function lidm(m){post('/api/lid?m='+m)}
@@ -629,7 +756,7 @@ async function graphs(){
   if(Date.now()-gLast < 5000) return;      // 30 min of hex is ~3.6 kB, no need to poll it fast
   gLast=Date.now();
   try{
-    const g=await (await fetch('/api/graph')).json();
+    const g=await gj('/api/graph');
     const raw=hexBytes(g.temp), f=hexBytes(g.flow), air=hexBytes(g.air||'');
     const gw=Math.max(320,($('gtemp').clientWidth||900)-2);
     $('gtemp').innerHTML=svgTemp(raw,air,g.cutout,gw);
@@ -737,7 +864,7 @@ function cycmode(m){cycBuilt=0;cycMode=-1;post('/api/cycle?mode='+m)}
 // copy, so what you edit is always what is actually stored.
 let CUS=null;
 async function cusget(){
-  CUS=await (await fetch('/api/custom')).json();
+  CUS=await gj('/api/custom');
   const sel=$('cusl');
   sel.innerHTML=CUS.slots.map((s,i)=>
     `<option value="${i}">${i+1}. ${s.name||'(free)'}</option>`).join('');
@@ -761,21 +888,20 @@ async function cusdel(){
   if(delarm!==k){ delarm=k; $('cusmsg').innerHTML='<span class=warn>click delete again</span>';
                   setTimeout(()=>{delarm=-1},4000); return }
   delarm=-1;
-  await fetch('/api/cycle?del='+k,{method:'POST'});
-  cycMode=-1; await cusget(); tick();
+  await req('/api/cycle?del='+k,'POST',1).catch(()=>{});
+  cycMode=-1; await cusget(); kick();
 }
 let delarm=-1;
 async function cussave(){
   const k=+$('cusl').value||0;
   const u='/api/custom?slot='+k+'&name='+encodeURIComponent($('cusn').value)
          +'&stages='+encodeURIComponent($('cuss').value);
-  const r=await fetch(u,{method:'POST'});
-  const j=await r.json();
+  const j=await req(u,'POST',1,'json').catch(()=>({ok:false,err:'no answer'}));
   $('cusmsg').innerHTML = j.ok
     ? '<span class=ok>saved</span>'
     : '<span class=bad>'+j.err+'</span>';
   if(j.ok){ cycMode=-1; await cusget(); }
-  tick();
+  kick();
 }
 function cyctemps(){cycMode=-1;post('/api/cycle?water='+$('wct').value+'&dry='+$('dct').value)}
 let cycMode=-1;
@@ -935,7 +1061,7 @@ function b1(k,mode){
 }
 async function tick(){
  try{
-  const s=await (await fetch('/api/status')).json();
+  const s=await gj('/api/status');
   $('hdr').textContent=`RELAY | up ${s.uptime_s}s | rssi ${s.rssi} | heap ${s.heap}`
     +(s.pressing?' | INJECTING':'');
   $('bflow').className=s.flow_hz>0?'on':'';
@@ -1064,7 +1190,7 @@ async function tick(){
   if(!$('fbleg').innerHTML){ $('fbleg').innerHTML=frameLegend(true);
                              $('fpleg').innerHTML=frameLegend(false); }
   try{
-    const c=await (await fetch('/api/cycle')).json();
+    const c=await gj('/api/cycle');
     if(cycMode!==c.mode){
       $('cyctabs').innerHTML=cycTabs(c); cycMode=c.mode; cycBuilt=0;
       // One sensor on this machine: byte 1, the sump NTC. water is a setpoint a
@@ -1097,7 +1223,7 @@ async function tick(){
   }catch(e){}
   const diagOn = $('diagbox').style.display !== 'none';
   if(diagOn){
-  const dt=await (await fetch('/api/detect')).json();
+  const dt=await gj('/api/detect');
   const gp=v=>v<0?'<span class=mut>?</span>':'GPIO'+v;
   let dh=dt.running?`<span class=warn>&#9679; scanning, phase ${dt.phase}&hellip;</span>`
         :dt.done?(dt.applied?'<span class=ok>&#9679; resolved &amp; saved</span>'
@@ -1119,23 +1245,41 @@ async function tick(){
                                         :`<span class=ok>0 bad</span>`);
   }).join(' &nbsp;|&nbsp; ');
   $('basetxt').textContent=s.base_c?('idle: '+s.base_c+'  |  '+s.base_p):'no baseline yet';
-  const dd=await (await fetch('/api/deltas')).json();
+  const dd=await gj('/api/deltas');
   $('dl').textContent = dd.length
     ? dd.map(x=>`${x.dir.padEnd(6)} ${x.hex.padEnd(26)} x${String(x.n).padEnd(5)} first ${x.age}s ago`).join('\n')
     : (s.base_c?'nothing different from idle yet':'snapshot idle first');
-  }  // end diagnostics: /api/detect and /api/deltas are not polled while hidden
-  const H=await (await fetch('/api/hist')).json();
+  // /api/hist and /api/frames feed boxes inside this panel, so they belong in
+  // here too. Polled unconditionally they were two of the five requests a tick
+  // spent, every second, on four <pre> blocks nobody was looking at.
+  const H=await gj('/api/hist');
   const fmt=a=>a.length?a.map(x=>
      (x.first/10).toFixed(1).padStart(7)+'s  '+x.hex.padEnd(26)+
      ' x'+String(x.n).padEnd(6)+(x.last<20?'\u25CF now':'last '+(x.last/10).toFixed(1)+'s')
    ).join('\n'):'(nothing yet)';
   $('hc').textContent=fmt(H.ctrl);    $('htp').textContent=fmt(H.to_panel);
   $('hp').textContent=fmt(H.panel);   $('htc').textContent=fmt(H.to_ctrl);
-  if(!frozen)$('f').textContent=await (await fetch('/api/frames?n=40')).text();
-  graphs();
- }catch(e){$('hdr').textContent='offline'}
+  if(!frozen)$('f').textContent=await gt('/api/frames?n=40');
+  }  // end diagnostics: nothing in this panel is polled while it is collapsed
+  if($('gbox').style.display!=='none') await graphs();
+ }catch(e){ $('hdr').textContent='offline'; throw e }
 }
-tick(); setInterval(()=>{if(!frozen)tick()},1000);
+
+// Chained, not intervalled: the next poll is scheduled when the last one has
+// finished, so however slow the link gets there is never more than one in
+// flight. Failures back off to 8 s, and a hidden tab (phone locked, app
+// switched) drops to 5 s instead of building a queue nobody is reading.
+let TICKT=null, TICKFAIL=0;
+function sched(ms){ clearTimeout(TICKT); TICKT=setTimeout(run,ms) }
+function kick(){ return run() }
+async function run(){
+  clearTimeout(TICKT);
+  if(frozen){ sched(1000); return }
+  try{ await tick(); TICKFAIL=0 }catch(e){ TICKFAIL++ }
+  sched(TICKFAIL ? Math.min(8000,1000*TICKFAIL) : (document.hidden?5000:1000));
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) sched(0) });
+sched(0);
 </script>
 )HTML";
 
