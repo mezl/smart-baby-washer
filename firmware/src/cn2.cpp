@@ -104,6 +104,18 @@ static uint8_t  s_panel_b1 = 0, s_panel_b2 = 0, s_panel_b3 = 0;
 // Differs from s_panel_b1 whenever an override or the cycle runner is driving:
 // the real panel sends 0x00 and the command exists only in the rewritten stream.
 static uint8_t  s_panel_b1_fwd = 0;
+// Byte 1 as the overrides WANT it, before the flush cap subtracts the intake
+// bit. The cap has to latch off this value, not off s_panel_b1_fwd: the moment
+// it strips b5 the condition it triggered on would read false, un-latch, and
+// the pair would oscillate at the frame rate.
+static uint8_t  s_panel_b1_want = 0;
+// Byte 3 as forwarded, so the cap sees the target the CONTROLLER is acting on
+// rather than the one the panel asked for.
+static uint8_t  s_panel_b3_fwd = 0;
+// ---- untargeted-flush cap (see FLUSH_CAP_MS_DEFAULT in config.h) ----------
+// The decision lives in cn2core::FlushCap so it is exercised on the host; this
+// is only the wiring.
+static cn2core::FlushCap s_fcap;
 // PROBE mode: the controller is fed a permanently idle panel frame while the
 // real panel's bytes are still captured. Buttons can then be pressed freely to
 // learn their codes without any of them reaching the controller.
@@ -205,6 +217,7 @@ static void wsrIdlePin(int8_t pin);
 static void wsrService();
 static void wsrDrive(bool on, const char *why);
 static void wsrPanelFrame();
+static void flushFrame();
 
 // ---------------------------------------------------------------------------
 // TREND BUFFERS
@@ -310,12 +323,15 @@ void begin() {
   s_wsr_low  = s_prefs.getBool("wsrl", WS_RELAY_ACTIVE_LOW != 0);
   s_wsr_mode = s_prefs.getUChar("wsrm", WSR_AUTO);
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
+  s_fcap.cap_ms = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
   s_prefs.end();
   // Before anything else can command it. Until this runs the pin is high-Z and
   // the external pull resistor is the only thing holding the pump off.
   wsrIdlePin(s_wsr_pin);
   Serial.printf("[wsr  ] wash-pump relay on GPIO%d, active-%s, mode %u\n",
                 (int)s_wsr_pin, s_wsr_low ? "LOW" : "HIGH", s_wsr_mode);
+  Serial.printf("[flush] untargeted-flush cap %lu ms%s\n",
+                (unsigned long)s_fcap.cap_ms, s_fcap.cap_ms ? "" : "  (DISABLED)");
   cycleLoad();                 // stage durations survive a reboot
   openPorts();
   if (!s_task) {
@@ -411,7 +427,7 @@ static inline void collect(uint8_t side, uint8_t b, uint32_t t_us) {
   memcpy(s_done[side], fr, n);
   s_donen[side] = n;
   s_seq[side]++;
-  if (side == 1) wsrPanelFrame();              // relay acts on whole frames only
+  if (side == 1) { wsrPanelFrame(); flushFrame(); }   // whole frames only
   if (side == 0 && n >= 8) flowEvent(fr[2]);   // byte 2, every change
   deltaCheck(side, fr, n);
   histAdd(side, fr, n);
@@ -553,7 +569,15 @@ static void pump() {
     po.p2 = s_p2_ovr; po.p3 = s_p3_ovr; po.probe = s_probe;
 
     uint8_t out = cn2core::rewritePanelByte(s_pb_i, b, po);
-    if (s_pb_i == 1) s_panel_b1_fwd = out;
+    // The cap is the last thing applied, so it overrides the cycle runner and a
+    // manual b5 override alike -- both can hold the intake on indefinitely, and
+    // neither is a reason to let it.
+    if (s_pb_i == 1) {
+      s_panel_b1_want = out;
+      out = s_fcap.apply(out);                  // drop intake, leave drain
+      s_panel_b1_fwd = out;
+    }
+    if (s_pb_i == 3) s_panel_b3_fwd = out;
     if (po.active() && s_pb_i == 4) out = s_pb_x;
     else s_pb_x ^= out;
     s_pb_i++;
@@ -1591,6 +1615,48 @@ static void wsrPanelFrame() {
   if (b0 == s_wsr_b0) { s_wsr_run = 0; return; }
   if (++s_wsr_run >= 2) { s_wsr_b0 = b0; s_wsr_run = 0; }
 }
+
+// The flush cap, evaluated once per checksum-valid panel frame.
+//
+// Runs off the PRE-CAP byte 1 and the forwarded byte 3, so it stays latched
+// once it fires. Releasing needs two consecutive non-flush frames: a single
+// dropped frame must not silently restart the clock, because that is the one
+// error that would make the cap useless exactly when it is needed.
+static uint32_t s_fcap_okprev = 0;
+static bool     s_fcap_wason   = false;
+
+static void flushFrame() {
+  const bool valid = (s_asm[1].ok != s_fcap_okprev);
+  s_fcap_okprev = s_asm[1].ok;
+  if (!valid) return;                     // a bad frame proves nothing
+
+  const bool tripped = s_fcap.frame(s_panel_b1_want, s_panel_b3_fwd, millis());
+  if (tripped)
+    // Not an abort. The drain keeps running, so the sump empties and the
+    // controller ends the stage the way it always has.
+    Serial.printf("[flush] CAP at %lu ms -- intake released, drain left on\n",
+                  (unsigned long)s_fcap.cap_ms);
+  else if (s_fcap.on && !s_fcap_wason)
+    Serial.println("[flush] untargeted flush started");
+  else if (!s_fcap.on && s_fcap_wason)
+    Serial.println("[flush] flush released");
+  s_fcap_wason = s_fcap.on;
+}
+
+void setFlushCap(uint32_t ms) {
+  s_fcap.cap_ms = ms;
+  s_fcap.hold   = false;                  // a new cap rearms an active flush
+  s_prefs.begin("d8link", false);
+  s_prefs.putULong("fcap", ms);
+  s_prefs.end();
+  Serial.printf("[flush] cap = %lu ms%s\n", (unsigned long)ms,
+                ms ? "" : "  (DISABLED)");
+}
+uint32_t flushCapMs()  { return s_fcap.cap_ms; }
+bool     flushActive() { return s_fcap.on; }
+uint32_t flushMs()     { return s_fcap.on ? (millis() - s_fcap.since) : 0; }
+bool     flushCapped() { return s_fcap.hold; }
+uint32_t flushCaps()   { return s_fcap.fired; }
 
 // Called at ~1 kHz from relayTask.
 static void wsrService() {

@@ -403,7 +403,10 @@ and starts rising, consistent with a sump running dry, but at different points:
 | selfclean2 | 31 °C | 37 °C |
 | selfclean | 42 °C | 43 °C |
 
-Temperature-linked rather than volumetric is as far as the evidence goes.
+Temperature-linked rather than volumetric is as far as the evidence goes. Either
+reading needs the same physical event — cold water no longer arriving, i.e. the
+tank running dry — so on a machine fed from an always-on supply nothing ends it.
+The firmware caps it at 180 s by default: [`POST /api/flushcap`](api.md).
 
 ## Byte 2 — carries no independent information ⚠️
 

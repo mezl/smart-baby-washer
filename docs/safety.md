@@ -64,6 +64,11 @@ Four more findings point the same way:
   meter with water still flowing**: the count stops, the target is never reached,
   and the motor runs forever into a machine that keeps filling. Any automation
   driving `b5` must carry its own timer.
+
+  The end-of-cycle flush is the same hazard with no target at all, and the
+  firmware caps it — see [`POST /api/flushcap`](api.md). ⚠️ **The tank is the
+  only other thing bounding a fill.** Plumb the machine to an always-on supply
+  and you replace a bounded spill with an unbounded one.
 - **Do not rely on status bit 0 to catch a dry pump.** It set within ~5 s on one
   run with a bone-dry line, but on a later run a counter frozen for 5.7 s under
   commanded intake left it at 0. Carry your own timer and watch the flow count

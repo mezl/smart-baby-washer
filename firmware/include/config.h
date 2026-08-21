@@ -10,7 +10,7 @@
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
 // the OTA uploader follow the board instead of an address that moves.
-#define OTA_HOSTNAME              "baby-washer"
+#define OTA_HOSTNAME              "d8-sniffer"
 #define OTA_PORT                  3232
 
 #define WIFI_CONNECT_TIMEOUT_MS   20000UL   // stop *blocking* after this...
@@ -132,6 +132,28 @@
 // is running -- these two limits are the only protection there is.
 #define WS_RELAY_MAX_ON_MS    1800000UL  // 30 min hard cap, then latch open
 #define WS_RELAY_LINK_DEAD_MS 3000UL     // no panel frame this long -> open
+
+// ---------------------------------------------------------------------------
+// Untargeted-flush cap
+// ---------------------------------------------------------------------------
+// The end-of-cycle cool-down rinse is panel byte 3 = 0xFF with the intake bit
+// set, and it carries no volume target and no timer at EITHER end. What ends it
+// is the water stopping: across the archive the same Self-Clean program ran it
+// 64.1 s once and 114.6 s another time, and all three captured flushes end just
+// after the sump temperature bottoms out and starts back up -- the signature of
+// a hand-filled tank running dry. That makes the tank the only thing bounding
+// it. Feed the tank from a float valve, or any always-on supply, and nothing
+// does.
+//
+// So bound it here. Once a flush has run this long the forwarded byte 1 has the
+// INTAKE bit cleared and the DRAIN bit left alone, which reproduces exactly the
+// event the controller already terminates on rather than inventing a new one.
+// The sump empties, the temperature rises, the cycle moves on.
+//
+// 180 s is 1.6x the longest flush ever observed (114.6 s) and longer than the
+// cycle runner's own longest (116 s), so it cannot truncate normal operation.
+// Settable at runtime via POST /api/flushcap; 0 disables.
+#define FLUSH_CAP_MS_DEFAULT  180000UL
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

@@ -400,6 +400,16 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
     <div class=lbl style="margin-top:1px" title="byte3 sets how much water the next fill draws. It does NOT start a cycle — forcing 40/20 was tried and the machine ignored it.">fill volume, not a cycle trigger</div>
     <div style="margin-top:3px" id=tgtbtn></div>
     <div class=lbl id=tgtnote style="margin-top:2px"></div>
+    <div style="margin-top:7px">
+      <b style="color:#9cf;font-size:11px;letter-spacing:.06em">FLUSH CAP</b>
+      <span id=fcapst class=lbl></span></div>
+    <div class=lbl style="margin-top:1px" title="A 0xFF flush is drain and intake together with no volume target, and neither end times it out -- it ends when the water stops arriving, i.e. when the hand-filled tank runs dry. Same Self-Clean program measured 64.1 s once and 114.6 s another time. On a machine fed from a float valve or any always-on supply nothing ends it, so this does: after the cap the INTAKE bit is stripped from the forwarded byte 1 and the DRAIN bit is left set, which reproduces the event the controller already terminates on.">strips intake, leaves the drain on &mdash; hover</div>
+    <div style="margin-top:3px">
+      <button class=sm onclick="fcap(180000)">180 s</button>
+      <button class=sm onclick="fcap(120000)">120 s</button>
+      <input id=fcs size=3 value=180 class=mono title="seconds">
+      <button class=sm onclick="fcap($('fcs').value*1000)">set</button>
+      <button class=sm onclick="fcap(0)" title="Only safe on a hand-filled tank, which bounds the flush by running dry.">off</button></div>
     <div class=lbl style="margin-top:3px">raw hex
       byte2 <input id=m2 size=2 value=D6 class=mono title="Determined by byte 3 in every frame ever captured. Sending an unpaired value is a state the machine has never produced — fine for probing, not for imitating it.">
       byte3 <input id=m3 size=2 value=23 class=mono title="the fill target">
@@ -956,6 +966,7 @@ function cycUpd(c){
     if(inp && document.activeElement!==inp && +inp.value!==s.secs) inp.value=s.secs;
   });
 }
+function fcap(ms){post('/api/flushcap?ms='+(ms|0))}
 function povr(c,v){post('/api/panel_ovr?clr='+c+'&set='+v)}
 function modeo(a,b){post('/api/mode_ovr?b2='+a+'&b3='+b)}
 
@@ -1185,6 +1196,15 @@ async function tick(){
       +'shut the intake motor has nothing to stop it &mdash; watch the machine.</span>'
     : 'steam 20 &middot; rinse 80 &middot; wash 90 &middot; clean 100 counts &middot; '
       +'flush = no target';
+  $('fcapst').innerHTML = s.flush_cap
+    ? '<span class=bad>&#9679; CAPPED &mdash; intake held down, drain still on</span>'
+    : s.flush_on
+    ? '<span class=warn>&#9679; flushing '+(s.flush_ms/1000).toFixed(0)+' s'
+      +(s.fcap_ms?' of '+(s.fcap_ms/1000).toFixed(0)+' s':'')+'</span>'
+    : s.fcap_ms
+    ? '<span class=mut>'+(s.fcap_ms/1000).toFixed(0)+' s'
+      +(s.flush_n?' &middot; fired '+s.flush_n+'x':'')+'</span>'
+    : '<span class=bad>&#9679; DISABLED &mdash; only the tank bounds a flush</span>';
   $('fb').innerHTML=frameHTML(s.fb,true);
   $('fp').innerHTML=frameHTML(s.fp,false);
   if(!$('fbleg').innerHTML){ $('fbleg').innerHTML=frameLegend(true);
@@ -1344,6 +1364,11 @@ static String statusJson() {
   j += ",\"wsr_n\":" + String(cn2::wsRelayCloses());
   j += ",\"wsr_lock\":" + String(cn2::wsRelayLocked() ? "true" : "false");
   j += ",\"wsr_pin\":" + String(cn2::wsRelayPin());
+  j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
+  j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");
+  j += ",\"flush_ms\":" + String(cn2::flushMs());
+  j += ",\"flush_cap\":" + String(cn2::flushCapped() ? "true" : "false");
+  j += ",\"flush_n\":" + String(cn2::flushCaps());
   j += ",\"wsr_low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false");
   j += ",\"virtual\":" + String(cn2::virtualOn() ? "true" : "false");
   j += ",\"virt_n\":" + String(cn2::virtualCount());
@@ -1509,6 +1534,19 @@ void begin() {
       ",\"pin\":" + String(cn2::wsRelayPin()) +
       ",\"low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false") +
       ",\"why\":\"" + String(cn2::wsRelayWhy()) + "\"}");
+  });
+
+  //   POST /api/flushcap?ms=180000     (0 disables)
+  //
+  // Bounds the untargeted cool-down flush. Nothing at either end of the link
+  // times one out -- it ends when the water stops arriving, which is the tank
+  // running dry. On a machine fed from an always-on supply that never happens.
+  s_server.on("/api/flushcap", HTTP_POST, []() {
+    if (s_server.hasArg("ms")) cn2::setFlushCap(s_server.arg("ms").toInt());
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"ms\":" + String(cn2::flushCapMs()) +
+      ",\"active\":" + String(cn2::flushActive() ? "true" : "false") +
+      ",\"capped\":" + String(cn2::flushCapped() ? "true" : "false") + "}");
   });
 
   //   POST /api/status_ovr?clr=42&set=00     (hex masks on byte 3)

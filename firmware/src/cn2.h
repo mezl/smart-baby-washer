@@ -104,6 +104,17 @@ bool    wsRelayActiveLow();
 void    setWsRelayPin(int8_t pin);
 int8_t  wsRelayPin();
 
+// ---- untargeted-flush cap -------------------------------------------------
+// A 0xFF flush has no volume target and no timeout at either end; see
+// FLUSH_CAP_MS_DEFAULT in config.h. After the cap the intake bit is stripped
+// from the forwarded panel byte 1 and the drain bit is left set.
+void     setFlushCap(uint32_t ms);   // 0 disables, persisted to NVS
+uint32_t flushCapMs();
+bool     flushActive();              // a 0xFF flush is being forwarded now
+uint32_t flushMs();                  // how long it has run, 0 when not flushing
+bool     flushCapped();              // intake is currently being held down
+uint32_t flushCaps();                // lifetime count of caps fired
+
 // Last complete frame seen in each direction, as a hex string.
 String lastFrameHex(uint8_t side);
 

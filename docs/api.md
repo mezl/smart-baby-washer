@@ -136,6 +136,31 @@ faking the count upward would convince the machine it had filled when it had not
 Does not raise `E1`: tested with zero flow for 330 s while the intake motor was
 commanded, and the panel waited without complaint.
 
+### `POST /api/flushcap?ms=180000`
+
+Bounds the untargeted cool-down flush (`pb1` intake bit set with byte 3 =
+`0xFF`). Neither end of the link times one out — it ends when the water stops
+arriving, which on a stock machine is the hand-filled tank running dry. The same
+Self-Clean program was measured at **64.1 s** and at **114.6 s**. Feed the tank
+from a float valve or any always-on supply and nothing ends it at all.
+
+After `ms` the **intake** bit is stripped from the forwarded byte 1 and the
+**drain** bit is left set, which reproduces the event the controller already
+terminates on rather than inventing a new one: the sump empties, the temperature
+rises, the cycle moves on.
+
+Applied last, so it also bounds the cycle runner and a manual `b5` override —
+both can hold the intake on indefinitely and neither is a reason to allow it.
+Metered fills are untouched: they carry a real target and the controller ends
+them itself on the flow count.
+
+Default **180 s**, persisted to NVS. That is 1.6× the longest flush ever
+observed and longer than the runner's own longest (116 s), so it cannot truncate
+normal operation. `0` disables it — only safe on a hand-filled tank, which
+bounds the flush by running dry.
+
+Status carries `fcap_ms`, `flush_on`, `flush_ms`, `flush_cap` and `flush_n`.
+
 ### `POST /api/wsrelay?mode=off|on|auto[&pol=low|high][&pin=N]`
 
 Drives the **external wash-pump relay**. The control board holds 24 V on the

@@ -96,6 +96,11 @@ inline uint8_t applyMask(uint8_t b, uint8_t clr, uint8_t set) {
 // override therefore drives both bits together.
 static const uint8_t LID_BITS = 0x02 | 0x80;
 
+// Panel byte 1, the load bitmap. Only the two the flush cap needs are named
+// here; the full map lives in docs/protocol.md.
+static const uint8_t LOAD_DRAIN  = 0x02;
+static const uint8_t LOAD_INTAKE = 0x20;
+
 struct StatusOvr {
   uint8_t lid_mode = 0;          // 0 pass, 1 force LID ON (closed), 2 force LID OFF
   uint8_t clr = 0, set = 0;
@@ -122,6 +127,62 @@ struct PanelOvr {
 
   bool active() const {
     return (pressing && press_mask) || probe || p1_clr || p1_set || p2 >= 0 || p3 >= 0;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Untargeted-flush cap
+// ---------------------------------------------------------------------------
+// A panel frame carrying the INTAKE bit with fill target 0xFF is the cool-down
+// rinse: drain and intake together, no volume target, and no timeout at either
+// end of the link. It stops when the water stops arriving, which on a stock
+// machine means the hand-filled tank running dry -- the same Self-Clean program
+// was measured at 64.1 s and at 114.6 s. Give the tank an always-on supply and
+// nothing ends it at all.
+//
+// This bounds it. Once a flush has run `cap_ms` the caller strips the intake bit
+// from the forwarded byte 1 and leaves the drain bit alone, which reproduces the
+// event the controller already terminates on instead of inventing a new one.
+//
+// Two rules earn their keep and both are about not un-latching by accident:
+//
+//   1. `b1_want` must be byte 1 BEFORE the cap is applied. Fed the post-cap
+//      value, stripping the intake bit makes the trigger condition read false,
+//      the state clears, the bit comes back, and the pair oscillates at the
+//      frame rate.
+//   2. Releasing needs two consecutive non-flush frames. One dropped frame must
+//      not silently restart the clock -- that is the single error that would
+//      make the cap useless in exactly the case it exists for.
+struct FlushCap {
+  uint32_t cap_ms = 0;           // 0 disables
+  bool     on     = false;       // a 0xFF flush is being forwarded
+  bool     hold   = false;       // strip the intake bit now
+  uint32_t since  = 0;           // when the current flush started
+  uint32_t fired  = 0;           // lifetime caps
+  uint8_t  off    = 0;           // consecutive non-flush frames
+
+  static bool isFlush(uint8_t b1_want, uint8_t b3_fwd) {
+    return (b1_want & LOAD_INTAKE) != 0 && b3_fwd == 0xFF;
+  }
+
+  // Call once per checksum-valid panel frame. Returns true when this call is
+  // the one that trips the cap, so the caller can log it exactly once.
+  bool frame(uint8_t b1_want, uint8_t b3_fwd, uint32_t now) {
+    if (!isFlush(b1_want, b3_fwd)) {
+      if (on && ++off >= 2) { on = false; hold = false; off = 0; }
+      return false;
+    }
+    off = 0;
+    if (!on) { on = true; hold = false; since = now; }
+    if (cap_ms && !hold && (uint32_t)(now - since) >= cap_ms) {
+      hold = true; fired++; return true;
+    }
+    return false;
+  }
+
+  // The byte actually forwarded.
+  uint8_t apply(uint8_t b1_want) const {
+    return hold ? (uint8_t)(b1_want & (uint8_t)~LOAD_INTAKE) : b1_want;
   }
 };
 
