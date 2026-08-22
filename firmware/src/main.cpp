@@ -141,6 +141,15 @@ void setup() {
   // stalling, THEN bring up the radio. See LINK_SETTLE_* in config.h.
   if (!g_safe_mode) cn2::waitLinkSettled(LINK_SETTLE_FRAMES, LINK_SETTLE_TIMEOUT_MS);
 
+  // Optional hold before the radio. See cn2::wifiDelayMs().
+  if (!g_safe_mode && cn2::wifiDelayMs()) {
+    const uint32_t d = cn2::wifiDelayMs();
+    Serial.printf("[wifi] holding the radio off for %lu ms; link is forwarding\n",
+                  (unsigned long)d);
+    const uint32_t h0 = millis();
+    while ((uint32_t)(millis() - h0) < d) { esp_task_wdt_reset(); delay(50); }
+  }
+
   // Now the slow parts, with the link already carrying traffic.
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 1500) { esp_task_wdt_reset(); delay(10); }

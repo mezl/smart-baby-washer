@@ -118,6 +118,7 @@ static uint8_t  s_panel_b3_fwd = 0;
 // The decision lives in cn2core::FlushCap so it is exercised on the host; this
 // is only the wiring.
 static cn2core::FlushCap s_fcap;
+static uint32_t s_wifi_delay = 0;   // radio hold at boot; see setWifiDelayMs()
 // PROBE mode: the controller is fed a permanently idle panel frame while the
 // real panel's bytes are still captured. Buttons can then be pressed freely to
 // learn their codes without any of them reaching the controller.
@@ -220,6 +221,7 @@ static void wsrService();
 static void wsrDrive(bool on, const char *why);
 static void wsrPanelFrame();
 static void flushFrame();
+static void closePorts();   // ordered teardown; see the definition
 
 // ---------------------------------------------------------------------------
 // TREND BUFFERS
@@ -327,6 +329,7 @@ void begin() {
   s_wsr_mode = s_prefs.getUChar("wsrm", WSR_AUTO);
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
   s_fcap.cap_ms = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
+  s_wifi_delay  = s_prefs.getULong("wifid", 0);
   s_prefs.end();
   // Before anything else can command it. Until this runs the pin is high-Z and
   // the external pull resistor is the only thing holding the pump off.
@@ -475,8 +478,28 @@ static void virtSim() {
   s_virt_flow = (uint8_t)s_virt_flowf;
 }
 
+// One per direction: [0] toward the panel, [1] toward the controller --
+// the same side numbering collectOut() uses.
+static cn2core::TxCoalesce s_txq[2];
+
+static void fwFlush(uint8_t side) {
+  cn2core::TxCoalesce &q = s_txq[side];
+  if (!q.n) return;
+  if (q.emit) {
+    if (side == 0) s_tx[1] += uPanel.write(q.buf, q.n);
+    else           s_tx[0] += uBoard.write(q.buf, q.n);
+    for (uint8_t i = 0; i < q.n; i++) collectOut(side, q.buf[i]);
+  }
+  q.clear();
+}
+
 static void pump() {
   if (!s_open) return;
+
+  // A partial frame whose sender stopped mid-way must not sit in the queue
+  // forever -- flush it once the line has been quiet for a frame gap.
+  if (s_txq[0].n && (uint32_t)(micros() - s_bp_prev) > frameGapUs()) fwFlush(0);
+  if (s_txq[1].n && (uint32_t)(micros() - s_pb_prev) > frameGapUs()) fwFlush(1);
 
   // Forward first, log second — the relay is the thing the machine depends on.
   // The budget bounds one pass so a firehose can never starve net::loop() and
@@ -485,7 +508,10 @@ static void pump() {
   while (uBoard.available() && budget--) {
     uint8_t b = (uint8_t)uBoard.read();
     uint32_t now_us = micros();
-    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) { s_bp_i = 0; s_bp_x = 0; }
+    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) {
+      s_bp_i = 0; s_bp_x = 0;
+      fwFlush(0);                    // stale partial goes out before the new frame
+    }
     s_bp_prev = now_us;
     // Decide once per frame, at its first byte, so a frame is never half-sent.
     if (s_bp_i == 0) s_thin_panel.atFrameStart();
@@ -535,7 +561,9 @@ static void pump() {
 
     // While the virtual controller is running we must NOT also forward the real
     // one, or the panel sees two controllers interleaved and rejects both.
-    if (!s_virt && s_thin_panel.fwd) { s_tx[1] += uPanel.write(out); collectOut(0, out); }
+    // Frame-atomic: the write happens when the frame is COMPLETE -- see
+    // cn2core::TxCoalesce for why.
+    if (s_txq[0].feed(out, !s_virt && s_thin_panel.fwd)) fwFlush(0);
     if (s_capture) push(FROM_BOARD, b);
   }
   if (budget < 0) s_overflow++;   // could not drain in one pass — see /api/status
@@ -545,7 +573,10 @@ static void pump() {
     uint8_t b = (uint8_t)uPanel.read();
 
     uint32_t nu = micros();
-    if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) { s_pb_i = 0; s_pb_x = 0; }
+    if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) {
+      s_pb_i = 0; s_pb_x = 0;
+      fwFlush(1);
+    }
     s_pb_prev = nu;
     if (s_pb_i == 0) s_thin_ctrl.atFrameStart();
     bool pressing = s_press_mask && (int32_t)(millis() - s_press_until) < 0;
@@ -587,7 +618,7 @@ static void pump() {
 
     // While impersonating the panel we must NOT also forward the real one, or
     // the board sees two panels interleaved and rejects both.
-    if (!s_spoof && s_thin_ctrl.fwd) { s_tx[0] += uBoard.write(out); collectOut(1, out); }
+    if (s_txq[1].feed(out, !s_spoof && s_thin_ctrl.fwd)) fwFlush(1);
     if (s_capture) push(FROM_PANEL, b);
   }
   if (budget < 0) s_overflow++;
@@ -1512,6 +1543,87 @@ static void relayTask(void *) {
   }
 }
 
+// A one-way failure is either the SoC pin, the level-shifter channel, or the
+// copper past it, and from the firmware those look identical -- until you use
+// the fact that the BSS138 board carries a 10k pull-up on BOTH sides of every
+// channel. That pull-up is the tell:
+//
+//   pull-down engaged, pin still reads HIGH  -> the shifter's 10k is present,
+//                                               so the channel is connected
+//   pull-down engaged, pin reads LOW         -> nothing is pulling it up: the
+//                                               LV pad is open, or the shifter
+//                                               has no 3V3 on LV
+//   driving HIGH but it reads back LOW       -> something external is holding
+//                                               it down (shorted FET, bridge)
+//
+// Run it against the KNOWN-GOOD transmit pin first and compare. One pin's
+// numbers mean little; the difference between the two means everything.
+bool pinProbe(int8_t pin, PinProbe &out) {
+  out = PinProbe();
+  out.pin = pin;
+  if (pin != s_pin_txb && pin != s_pin_txp) {
+    snprintf(out.verdict, sizeof(out.verdict),
+             "GPIO%d is not one of the transmit pins (%d, %d). The receive pins "
+             "have an OEM output on them and must never be driven.",
+             (int)pin, (int)s_pin_txb, (int)s_pin_txp);
+    return false;
+  }
+
+  closePorts();                    // ~45 ms of no forwarding, safely ordered
+
+  pinMode(pin, INPUT_PULLUP);   delay(3); out.pullup   = digitalRead(pin);
+  pinMode(pin, INPUT_PULLDOWN); delay(3); out.pulldown = digitalRead(pin);
+
+  // INPUT_OUTPUT, not OUTPUT: Arduino's OUTPUT disables the input buffer, and
+  // then digitalRead() returns what we asked for rather than what the pad is
+  // actually at -- which is the entire question.
+  gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT_OUTPUT);
+  gpio_set_level((gpio_num_t)pin, 1); delay(3); out.drive_hi = gpio_get_level((gpio_num_t)pin);
+  gpio_set_level((gpio_num_t)pin, 0); delay(3); out.drive_lo = gpio_get_level((gpio_num_t)pin);
+
+  for (int i = 0; i < 200; i++) {
+    gpio_set_level((gpio_num_t)pin, i & 1);
+    if (gpio_get_level((gpio_num_t)pin) == (i & 1)) out.edges++;
+    out.toggles++;
+    delayMicroseconds(50);
+  }
+  gpio_set_level((gpio_num_t)pin, 1);            // UART idles HIGH
+
+  const bool follows = (out.drive_hi == 1 && out.drive_lo == 0 &&
+                        out.edges == out.toggles);
+  const bool pulled  = (out.pulldown == 1);
+  snprintf(out.verdict, sizeof(out.verdict),
+           follows
+             ? (pulled ? "pin drives and reads back; shifter pull-up present"
+                       : "pin drives, but NO external pull-up: LV pad open or "
+                         "shifter unpowered")
+             : (out.drive_hi == 0 ? "pin cannot be driven HIGH — held low externally"
+                                  : "pin does not follow what is written to it"));
+
+  openPorts();
+  return follows && pulled;
+}
+
+// Close the ports so another task can have the pins.
+//
+// ORDER MATTERS, and both callers had it backwards: they ended the UARTs and
+// THEN cleared s_open, leaving a window in which relayTask -- priority 10, a
+// 1 ms cycle -- could be inside pump() holding a driver that was being
+// destroyed underneath it. Doing that from the web task wedged the board hard
+// enough that only the task watchdog got it back.
+//
+// pump() returns immediately on !s_open, so clearing the flag first and giving
+// relayTask a few of its own cycles to notice is all the interlock needed. No
+// suspend: parking a task that may be holding a UART lock is how the deadlock
+// gets worse, not better.
+static void closePorts() {
+  fwFlush(0); fwFlush(1);            // nothing may die in the queue
+  s_open = false;
+  vTaskDelay(pdMS_TO_TICKS(5));    // >= 4 relayTask cycles
+  uBoard.end();
+  uPanel.end();
+}
+
 uint32_t worstGapUs() { return s_late_us; }
 uint32_t worstGapAtMs() { return s_late_at; }
 
@@ -1676,6 +1788,16 @@ void setFlushCap(uint32_t ms) {
   Serial.printf("[flush] cap = %lu ms%s\n", (unsigned long)ms,
                 ms ? "" : "  (DISABLED)");
 }
+uint32_t wifiDelayMs() { return s_wifi_delay; }
+void setWifiDelayMs(uint32_t ms) {
+  if (ms > 300000UL) ms = 300000UL;   // never strand the only way back in
+  s_wifi_delay = ms;
+  s_prefs.begin("d8link", false);
+  s_prefs.putULong("wifid", ms);
+  s_prefs.end();
+  Serial.printf("[wifi] start delay = %lu ms\n", (unsigned long)ms);
+}
+
 uint32_t flushCapMs()  { return s_fcap.cap_ms; }
 bool     flushActive() { return s_fcap.on; }
 uint32_t flushMs()     { return s_fcap.on ? (millis() - s_fcap.since) : 0; }
@@ -1842,6 +1964,25 @@ static uint8_t sniffHeader(HardwareSerial &u, int8_t rx, uint32_t ms) {
 }
 
 // Forward on the current pin map for `ms`, then report the controller's E5 bit.
+// trialClearsE5() below passes when the controller's E5 bit is CLEAR, so it can
+// only tell two transmit permutations apart if the bit is SET when the trial
+// starts. On a controller that was never faulted, the first permutation passes
+// on its first poll -- including when it is the wrong one, which phase 2 then
+// writes to NVS. On a board sealed inside an appliance that trades a
+// half-working link for a dead one, so provoke the fault first and refuse to
+// guess if it never comes.
+static bool provokeE5(uint32_t ms) {
+  s_pin_txb = -1; s_pin_txp = -1;      // LISTEN: the ports open with no TX pin
+  openPorts();
+  s_capture = true;
+  const uint32_t t0 = millis();
+  while ((uint32_t)(millis() - t0) < ms) {
+    vTaskDelay(pdMS_TO_TICKS(50));
+    if (s_st_real & 0x40) return true;
+  }
+  return false;
+}
+
 static bool trialClearsE5(uint32_t ms) {
   openPorts();
   s_capture = true;
@@ -1875,7 +2016,7 @@ static void detectTask(void *arg) {
   s_det.phase   = 1;
 
   // ---- phase 1a: which pins are being driven? ----------------------------
-  uBoard.end(); uPanel.end(); s_open = false;
+  closePorts();
   for (int i = 0; i < 4; i++) {
     s_edge_n[i] = 0;
     pinMode(cand[i], INPUT);
@@ -1932,6 +2073,17 @@ static void detectTask(void *arg) {
   s_det.phase = 2;
   s_pin_rxb = s_det.rx_ctrl;
   s_pin_rxp = s_det.rx_panel;
+
+  // Starve the controller until it says so. Without this the trial below has
+  // nothing to discriminate on -- see provokeE5().
+  if (!provokeE5(PHASE2_PROVOKE_MS)) {
+    snprintf(s_det.note, sizeof(s_det.note),
+             "The controller did not raise E5 after %lu s with nothing transmitted "
+             "to it, so there is no signal to resolve the transmit pins against. "
+             "Phase 2 cannot run here -- set them by hand with POST /api/pinmap.",
+             (unsigned long)(PHASE2_PROVOKE_MS / 1000));
+    goto restore;
+  }
 
   s_pin_txb = s_det.tx_a; s_pin_txp = s_det.tx_b;
   if (trialClearsE5(2500)) {

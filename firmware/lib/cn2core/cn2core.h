@@ -186,6 +186,43 @@ struct FlushCap {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Frame-atomic transmit coalescing
+// ---------------------------------------------------------------------------
+// The relay used to emit each rewritten byte the moment it arrived. That has
+// zero added latency, but it couples the WIRE to the CPU: anything that stalls
+// the forwarding task mid-frame -- measured 96 ms during WiFi association,
+// when a flash write disables the instruction cache and no task priority
+// helps -- splits the frame ON THE WIRE, and a receiver with a short
+// inter-byte timeout reads that as a comms failure.
+//
+// So coalesce: buffer the rewritten bytes and hand the UART the whole frame in
+// one write. A frame is at most 8 bytes and the TX FIFO holds 128, so the
+// hardware clocks it out back-to-back with no further CPU involvement. A stall
+// can now only delay a frame (a one-off 296 ms beat instead of 200), never
+// split one. Cost: the first byte leaves ~7 byte-times (~7.3 ms) later than it
+// used to, against a 200 ms broadcast period.
+//
+// Transparency rule: a byte with an unknown header flushes immediately, so
+// noise and foreign traffic still pass byte-for-byte as before.
+struct TxCoalesce {
+  uint8_t buf[16];
+  uint8_t n    = 0;
+  uint8_t want = 0;      // expected frame length; 0 = unknown header
+  bool    emit = true;   // false once any byte of the frame was suppressed
+
+  // Append one rewritten byte. Returns true when buf[0..n) must be written now
+  // (frame complete, unknown header, or buffer full). Caller writes if emit,
+  // then calls clear().
+  bool feed(uint8_t b, bool fwd) {
+    if (n == 0) { want = frameLenFor(b); emit = fwd; }
+    if (!fwd) emit = false;
+    buf[n++] = b;
+    return want == 0 || n >= want || n >= (uint8_t)sizeof(buf);
+  }
+  void clear() { n = 0; want = 0; emit = true; }
+};
+
 // idx is the byte's position in the 5-byte frame (0 = header, 4 = checksum).
 inline uint8_t rewritePanelByte(uint8_t idx, uint8_t b, const PanelOvr &o) {
   uint8_t out = b;

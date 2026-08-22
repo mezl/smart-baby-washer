@@ -309,6 +309,26 @@ From 1.2.0 the restart only fires when the CN2 link has gone idle too; while
 frames are flowing it re-kicks the supplicant indefinitely and logs that it is
 holding off. Check `rssi`: −59 dBm is comfortable, −78 is not.
 
+### If the panel is stricter than the controller
+
+The two ends do not tolerate the same silence. Starved deliberately
+(`/api/thin`), this controller raises its comms bit after **~8 s** without a
+panel frame. A touch panel can fault on far less — a measured **96 ms**
+forwarding stall during WiFi association (a flash write disables the
+instruction cache; no task priority helps) split a frame mid-transmission and
+was enough for one panel to latch `E5` a few seconds after every power-on,
+while the controller never noticed anything.
+
+From 1.3.0 forwarding is **frame-atomic**: rewritten bytes are coalesced and
+the UART is handed the whole frame in one write, so the 128-byte TX FIFO clocks
+it out with no further CPU involvement. A stall can delay a frame — a one-off
+296 ms beat instead of 200 — but never split one on the wire. Unknown-header
+bytes still pass through immediately, so the relay stays transparent to noise.
+
+⚠️ An OTA update still interrupts forwarding for 15–20 s, which is beyond both
+ends' tolerance — expect a latched `E5` after any flash, and power-cycle the
+machine to clear it. That is the update, not a fault.
+
 If the link is clean and `st_real` is `0x00` but the panel still shows `E5`,
 power-cycle the machine. If `E5` comes straight back, take the module out of the
 loop — panel plugged directly into the controller — and power on. Clean without

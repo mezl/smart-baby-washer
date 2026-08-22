@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.2.0"
+#define FW_VERSION  "1.3.0"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -176,6 +176,13 @@
 // what stops a bench board with no machine attached waiting forever.
 #define LINK_SETTLE_FRAMES      10
 #define LINK_SETTLE_TIMEOUT_MS  5000UL
+
+// How long phase 2 of the pin autodetect will starve the controller waiting for
+// it to raise E5. It needs the fault ASSERTED to tell the two transmit
+// permutations apart; without it the first one tried always "passes". Observed
+// on one machine: the bit appeared ~47 s after a link interruption, so this is
+// generous on purpose. Nothing is energised while it runs.
+#define PHASE2_PROVOKE_MS       60000UL
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

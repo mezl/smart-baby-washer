@@ -1356,6 +1356,7 @@ static String statusJson() {
   j += ",\"spoof_frame\":\"" + cn2::spoofFrameHex() + "\"";
   j += ",\"worst_gap_us\":" + String(cn2::worstGapUs());
   j += ",\"worst_gap_at\":" + String(cn2::worstGapAtMs());
+  j += ",\"wifi_delay\":" + String(cn2::wifiDelayMs());
   j += ",\"tx_to_board\":" + String(cn2::txCount(cn2::TO_BOARD));
   j += ",\"tx_to_panel\":" + String(cn2::txCount(cn2::TO_PANEL));
   j += ",\"flow_hz\":" + String(cn2::flowHz());
@@ -1555,6 +1556,29 @@ void begin() {
       "{\"ok\":true,\"ms\":" + String(cn2::flushCapMs()) +
       ",\"active\":" + String(cn2::flushActive() ? "true" : "false") +
       ",\"capped\":" + String(cn2::flushCapped() ? "true" : "false") + "}");
+  });
+
+  //   POST /api/wifidelay?ms=60000    (0 = normal)
+  s_server.on("/api/wifidelay", HTTP_POST, []() {
+    if (s_server.hasArg("ms")) cn2::setWifiDelayMs(s_server.arg("ms").toInt());
+    s_server.send(200, "application/json",
+                  "{\"ok\":true,\"ms\":" + String(cn2::wifiDelayMs()) + "}");
+  });
+
+  //   POST /api/pinprobe?pin=3    — transmit stubs only
+  s_server.on("/api/pinprobe", HTTP_POST, []() {
+    cn2::PinProbe p;
+    const bool ok = cn2::pinProbe((int8_t)s_server.arg("pin").toInt(), p);
+    String j = "{\"ok\":" + String(ok ? "true" : "false");
+    j += ",\"pin\":" + String(p.pin);
+    j += ",\"pullup\":" + String(p.pullup);
+    j += ",\"pulldown\":" + String(p.pulldown);
+    j += ",\"drive_hi\":" + String(p.drive_hi);
+    j += ",\"drive_lo\":" + String(p.drive_lo);
+    j += ",\"toggles\":" + String(p.toggles);
+    j += ",\"edges\":" + String(p.edges);
+    j += ",\"verdict\":\"" + String(p.verdict) + "\"}";
+    s_server.send(200, "application/json", j);
   });
 
   //   POST /api/status_ovr?clr=42&set=00     (hex masks on byte 3)

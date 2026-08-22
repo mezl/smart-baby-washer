@@ -519,6 +519,63 @@ static void test_flushcap_default_clears_a_real_flush(void) {
   TEST_ASSERT_FALSE(f.hold);
 }
 
+
+// ---------------------------------------------------------------------------
+// Frame-atomic transmit coalescing
+// ---------------------------------------------------------------------------
+static void test_txq_holds_a_ctrl_frame_until_complete(void) {
+  cn2core::TxCoalesce q;
+  const uint8_t f[8] = {0xA2,0x19,0x00,0x02,0x04,0x0D,0x02,0xB2};
+  for (int i = 0; i < 7; i++)
+    TEST_ASSERT_FALSE(q.feed(f[i], true));      // nothing leaves early
+  TEST_ASSERT_TRUE(q.feed(f[7], true));         // whole frame, in one write
+  TEST_ASSERT_EQUAL_UINT8(8, q.n);
+  TEST_ASSERT_TRUE(q.emit);
+  TEST_ASSERT_EQUAL_MEMORY(f, q.buf, 8);
+}
+
+static void test_txq_panel_frame_is_five_bytes(void) {
+  cn2core::TxCoalesce q;
+  const uint8_t f[5] = {0xAA,0x00,0x40,0x20,0xCA};
+  for (int i = 0; i < 4; i++) TEST_ASSERT_FALSE(q.feed(f[i], true));
+  TEST_ASSERT_TRUE(q.feed(f[4], true));
+  TEST_ASSERT_EQUAL_UINT8(5, q.n);
+}
+
+static void test_txq_unknown_header_passes_through_at_once(void) {
+  // Transparency: noise and foreign traffic must not be held hostage to a
+  // frame length nobody knows.
+  cn2core::TxCoalesce q;
+  TEST_ASSERT_TRUE(q.feed(0x55, true));
+  TEST_ASSERT_EQUAL_UINT8(1, q.n);
+}
+
+static void test_txq_suppression_drops_the_whole_frame(void) {
+  // Thinning decides per frame; a frame with any suppressed byte must vanish
+  // entirely rather than reach the wire as a fragment.
+  cn2core::TxCoalesce q;
+  const uint8_t f[5] = {0xAA,0x00,0x40,0x20,0xCA};
+  for (int i = 0; i < 4; i++) q.feed(f[i], i != 2);   // one byte suppressed
+  TEST_ASSERT_TRUE(q.feed(f[4], true));
+  TEST_ASSERT_FALSE(q.emit);
+}
+
+static void test_txq_clear_rearms(void) {
+  cn2core::TxCoalesce q;
+  q.feed(0xAA, false); q.clear();
+  TEST_ASSERT_TRUE(q.emit);
+  TEST_ASSERT_EQUAL_UINT8(0, q.n);
+  TEST_ASSERT_TRUE(q.feed(0x99, true));   // unknown header again flushes at once
+}
+
+static void test_txq_never_overruns_its_buffer(void) {
+  cn2core::TxCoalesce q;
+  q.feed(0xA2, true);                     // wants 8...
+  int flushes = 0;
+  for (int i = 0; i < 40; i++) if (q.feed(0x00, true)) { flushes++; q.clear(); }
+  TEST_ASSERT_GREATER_THAN(0, flushes);   // ...but a liar of a sender still flushes
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -582,6 +639,13 @@ int main(int, char **) {
   RUN_TEST(test_flushcap_zero_disables);
   RUN_TEST(test_flushcap_survives_millis_rollover);
   RUN_TEST(test_flushcap_default_clears_a_real_flush);
+
+  RUN_TEST(test_txq_holds_a_ctrl_frame_until_complete);
+  RUN_TEST(test_txq_panel_frame_is_five_bytes);
+  RUN_TEST(test_txq_unknown_header_passes_through_at_once);
+  RUN_TEST(test_txq_suppression_drops_the_whole_frame);
+  RUN_TEST(test_txq_clear_rearms);
+  RUN_TEST(test_txq_never_overruns_its_buffer);
 
   RUN_TEST(test_end_to_end_forced_intake_motor);
   RUN_TEST(test_thinned_stream_emits_whole_frames);

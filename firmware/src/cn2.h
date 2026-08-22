@@ -57,6 +57,23 @@ uint32_t spoofCount();
 
 // Worst observed interval between forwarding passes. If this climbs into the
 // milliseconds the relay is being starved and the board will flag E5.
+// ---- transmit-stub pin test ----------------------------------------------
+// Localises a one-way link failure without a meter. Only the two TRANSMIT pins
+// may be tested: the receive pins have an OEM output on them and driving those
+// is how boards die.
+struct PinProbe {
+  int8_t   pin      = -1;
+  bool     ran      = false;
+  int8_t   pullup   = -1;  // level with the ESP32's own pull-UP engaged
+  int8_t   pulldown = -1;  // ...and its pull-DOWN. The shifter's 10k beats it.
+  int8_t   drive_hi = -1;  // level read back while driving HIGH
+  int8_t   drive_lo = -1;  // ...and LOW
+  uint32_t toggles  = 0;
+  uint32_t edges    = 0;   // edges the pin's own input path saw us make
+  char     verdict[160] = {0};
+};
+bool     pinProbe(int8_t pin, PinProbe &out);
+
 uint32_t worstGapUs();
 // millis() at which that worst gap was recorded. A stall during WiFi
 // association is harmless once the machine's startup handshake is already
@@ -360,5 +377,14 @@ void     resetGap();   // clears the worst-gap high-water mark
 // Returns false on timeout, which is not fatal -- it only means the link was
 // quiet, e.g. on a bench with no machine attached.
 bool     waitLinkSettled(uint16_t frames, uint32_t timeout_ms);
+
+// Hold the radio off for this long after the link settles, forwarding all the
+// while. Exists to test one thing: WiFi association stalls relayTask for ~96 ms
+// and no task priority beats it, so if a far end faults on a gap that size, the
+// fault must move with the delay. Persisted, so it is settable without a
+// reflash -- which matters when the only way in is the radio you are delaying.
+// 0 = normal.
+uint32_t wifiDelayMs();
+void     setWifiDelayMs(uint32_t ms);
 
 }  // namespace cn2
