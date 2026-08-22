@@ -123,6 +123,7 @@ static uint8_t  s_panel_b3_fwd = 0;
 // The decision lives in cn2core::FlushCap so it is exercised on the host; this
 // is only the wiring.
 static cn2core::FlushCap s_fcap;
+static cn2core::FillStall s_fstall;   // panel-run fill guard; see cn2core
 static uint8_t  s_e5f_mode = E5F_AUTO;   // false-E5 filter; see e5FilterActive()
 static uint32_t s_wifi_delay = 0;   // radio hold at boot; see setWifiDelayMs()
 // PROBE mode: the controller is fed a permanently idle panel frame while the
@@ -359,7 +360,8 @@ void begin() {
   s_wsr_low  = s_prefs.getBool("wsrl", WS_RELAY_ACTIVE_LOW != 0);
   s_wsr_mode = s_prefs.getUChar("wsrm", WSR_AUTO);
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
-  s_fcap.cap_ms = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
+  s_fcap.cap_ms    = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
+  s_fstall.stall_ms = s_prefs.getULong("fstall", FILL_STALL_MS_DEFAULT);
   s_wifi_delay  = s_prefs.getULong("wifid", 0);
   s_e5f_mode    = s_prefs.getUChar("e5f", E5F_AUTO);
   if (s_e5f_mode > E5F_FORCE) s_e5f_mode = E5F_AUTO;
@@ -742,6 +744,7 @@ static void pump() {
     if (s_pb_i == 1) {
       s_panel_b1_want = out;
       out = s_fcap.apply(out);                  // drop intake, leave drain
+      out = s_fstall.apply(out);                // ...and if water never came
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
@@ -2071,6 +2074,13 @@ static void flushFrame() {
   s_fcap_okprev = s_asm[1].ok;
   if (!valid) return;                     // a bad frame proves nothing
 
+  const bool stalled = s_fstall.frame((s_panel_b1_want & 0x20) != 0,
+                                      s_flow_real, millis());
+  if (stalled)
+    Serial.printf("[fill ] NO FLOW for %lu s with intake commanded — intake "
+                  "released. Check the tank, then the flow meter.\n",
+                  (unsigned long)(s_fstall.stall_ms / 1000));
+
   const bool tripped = s_fcap.frame(s_panel_b1_want, s_panel_b3_fwd, millis());
   if (tripped)
     // Not an abort. The drain keeps running, so the sump empties and the
@@ -2102,6 +2112,19 @@ void setWifiDelayMs(uint32_t ms) {
   s_prefs.end();
   Serial.printf("[wifi] start delay = %lu ms\n", (unsigned long)ms);
 }
+
+void setFillStall(uint32_t ms) {
+  s_fstall.stall_ms = ms;
+  s_fstall.cut = false;
+  s_prefs.begin("d8link", false);
+  s_prefs.putULong("fstall", ms);
+  s_prefs.end();
+  Serial.printf("[fill ] stall cutout = %lu ms%s\n", (unsigned long)ms,
+                ms ? "" : "  (DISABLED)");
+}
+uint32_t fillStallMs()  { return s_fstall.stall_ms; }
+bool     fillStallCut() { return s_fstall.cut; }
+uint32_t fillStallCuts(){ return s_fstall.cuts; }
 
 uint32_t flushCapMs()  { return s_fcap.cap_ms; }
 bool     flushActive() { return s_fcap.on; }

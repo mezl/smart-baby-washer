@@ -954,6 +954,93 @@ static void test_framepos_insideframe_guards_the_clock_reset(void) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// FillStall — the guard a panel-run cycle never had
+// ---------------------------------------------------------------------------
+// Measured on the machine: the panel held intake for 1029 s against a flow
+// meter that had stopped counting, and raised nothing at either end.
+static void test_fillstall_normal_fill_is_never_cut(void) {
+  // 90 counts at ~2.24/s: the count keeps moving, so the timer keeps resetting.
+  cn2core::FillStall f; f.stall_ms = 120000;
+  uint8_t flow = 0;
+  for (uint32_t t = 0; t < 42000; t += 450) {
+    TEST_ASSERT_FALSE(f.frame(true, flow, t));
+    if (flow < 90) flow++;
+  }
+  TEST_ASSERT_FALSE_MESSAGE(f.cut, "a normal fill was cut short");
+}
+
+static void test_fillstall_slow_fill_is_never_cut(void) {
+  // Even a fill three times slower than measured must survive: any movement
+  // at all rearms the timer.
+  cn2core::FillStall f; f.stall_ms = 120000;
+  uint8_t flow = 0;
+  uint32_t t = 0;
+  for (; flow < 90; t += 1500) { f.frame(true, flow, t); flow++; }
+  TEST_ASSERT_FALSE_MESSAGE(f.cut, "a 135 s fill was cut short");
+  // The panel releases intake once the target lands; holding it commanded
+  // against a frozen count past that point IS the stall condition, so the
+  // test must model the release rather than assert the guard never fires.
+  f.frame(false, flow, t);
+  TEST_ASSERT_FALSE(f.cut);
+}
+
+static void test_fillstall_dead_meter_is_cut(void) {
+  cn2core::FillStall f; f.stall_ms = 120000;
+  uint32_t trips = 0;
+  for (uint32_t t = 0; t <= 200000; t += 200)
+    if (f.frame(true, 0, t)) trips++;
+  TEST_ASSERT_EQUAL_UINT32(1, trips);        // logs once, not every frame
+  TEST_ASSERT_TRUE(f.cut);
+  TEST_ASSERT_EQUAL_HEX8(cn2core::LOAD_DRAIN,
+                         f.apply(cn2core::LOAD_DRAIN | cn2core::LOAD_INTAKE));
+}
+
+static void test_fillstall_the_real_1029_second_event(void) {
+  // Replay it: intake commanded, byte 2 frozen at 0, 200 ms frames.
+  cn2core::FillStall f; f.stall_ms = 120000;
+  bool cut_by = false;
+  for (uint32_t t = 0; t <= 1029000; t += 200)
+    if (f.frame(true, 0, t) ) cut_by = true;
+  TEST_ASSERT_TRUE(cut_by);
+  TEST_ASSERT_EQUAL_UINT32(1, f.cuts);
+}
+
+static void test_fillstall_releases_when_the_panel_releases_intake(void) {
+  cn2core::FillStall f; f.stall_ms = 1000;
+  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(true, 0, t);
+  TEST_ASSERT_TRUE(f.cut);
+  f.frame(false, 0, 1200);                   // panel drops intake
+  TEST_ASSERT_FALSE(f.cut);                  // rearmed for the next fill
+  TEST_ASSERT_EQUAL_HEX8(cn2core::LOAD_INTAKE, f.apply(cn2core::LOAD_INTAKE));
+}
+
+static void test_fillstall_stays_cut_on_its_own_output(void) {
+  // Fed the POST-cut byte the condition would clear and the pair would
+  // oscillate -- the same trap as the flush cap.
+  cn2core::FillStall f; f.stall_ms = 1000;
+  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(true, 0, t);
+  for (uint32_t t = 1200; t <= 9000; t += 200) f.frame(true, 0, t);
+  TEST_ASSERT_TRUE(f.cut);
+  TEST_ASSERT_EQUAL_UINT32(1, f.cuts);
+}
+
+static void test_fillstall_zero_disables(void) {
+  cn2core::FillStall f; f.stall_ms = 0;
+  for (uint32_t t = 0; t <= 600000; t += 1000) f.frame(true, 0, t);
+  TEST_ASSERT_FALSE(f.cut);
+  TEST_ASSERT_EQUAL_UINT32(0, f.cuts);
+}
+
+static void test_fillstall_survives_millis_rollover(void) {
+  cn2core::FillStall f; f.stall_ms = 1000;
+  const uint32_t t0 = 0xFFFFFF00u;
+  f.frame(true, 0, t0);
+  TEST_ASSERT_FALSE(f.cut);
+  TEST_ASSERT_TRUE(f.frame(true, 0, (uint32_t)(t0 + 1000)));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -1004,6 +1091,15 @@ int main(int, char **) {
   RUN_TEST(test_isDriven_threshold);
   RUN_TEST(test_resolveRx_both_orders);
   RUN_TEST(test_resolveRx_refuses_ambiguous_input);
+
+  RUN_TEST(test_fillstall_normal_fill_is_never_cut);
+  RUN_TEST(test_fillstall_slow_fill_is_never_cut);
+  RUN_TEST(test_fillstall_dead_meter_is_cut);
+  RUN_TEST(test_fillstall_the_real_1029_second_event);
+  RUN_TEST(test_fillstall_releases_when_the_panel_releases_intake);
+  RUN_TEST(test_fillstall_stays_cut_on_its_own_output);
+  RUN_TEST(test_fillstall_zero_disables);
+  RUN_TEST(test_fillstall_survives_millis_rollover);
 
   RUN_TEST(test_flushcap_ignores_a_targeted_fill);
   RUN_TEST(test_flushcap_ignores_a_drain_without_intake);

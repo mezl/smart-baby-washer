@@ -1426,6 +1426,9 @@ static String statusJson() {
   j += ",\"e5f_leaks\":" + String(cn2::e5FilterLeaks());
   j += ",\"e5f_doubt\":" + String(cn2::e5FilterDoubt());
   j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
+  j += ",\"fstall_ms\":" + String(cn2::fillStallMs());
+  j += ",\"fstall_cut\":" + String(cn2::fillStallCut() ? "true" : "false");
+  j += ",\"fstall_n\":" + String(cn2::fillStallCuts());
   j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
   j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");
   j += ",\"flush_ms\":" + String(cn2::flushMs());
@@ -1597,6 +1600,15 @@ void begin() {
       ",\"pin\":" + String(cn2::wsRelayPin()) +
       ",\"low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false") +
       ",\"why\":\"" + String(cn2::wsRelayWhy()) + "\"}");
+  });
+
+  //   POST /api/fillstall?ms=120000    (0 disables)
+  s_server.on("/api/fillstall", HTTP_POST, []() {
+    if (s_server.hasArg("ms")) cn2::setFillStall(s_server.arg("ms").toInt());
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"ms\":" + String(cn2::fillStallMs()) +
+      ",\"cut\":" + String(cn2::fillStallCut() ? "true" : "false") +
+      ",\"cuts\":" + String(cn2::fillStallCuts()) + "}");
   });
 
   //   POST /api/flushcap?ms=180000     (0 disables)

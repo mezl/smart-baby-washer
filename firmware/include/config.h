@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.5.1"
+#define FW_VERSION  "1.6.0"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -191,6 +191,13 @@
 // the asymmetry is deliberate: reporting late costs seconds, reporting a false
 // positive costs the owner a power cycle.
 #define E5_FILTER_DOUBT_FRAMES  25
+
+// How long the intake bit may be commanded with the flow count frozen before
+// the relay strips it. A full 90-count fill takes ~40 s at the measured
+// 2.24 counts/s, so 120 s is three times the longest normal fill -- no honest
+// fill can reach it, and nothing else in this machine will ever stop one.
+// 0 disables. See cn2core::FillStall.
+#define FILL_STALL_MS_DEFAULT   120000UL
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

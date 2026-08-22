@@ -177,6 +177,14 @@ int8_t  wsRelayPin();
 // A 0xFF flush has no volume target and no timeout at either end; see
 // FLUSH_CAP_MS_DEFAULT in config.h. After the cap the intake bit is stripped
 // from the forwarded panel byte 1 and the drain bit is left set.
+// ---- fill-stall cutout (panel-run cycles) ---------------------------------
+// Neither end has a fill timeout: measured 1029 s of commanded intake against
+// a dead flow meter. Strips the intake bit when the count stops advancing.
+void     setFillStall(uint32_t ms);  // 0 disables, persisted to NVS
+uint32_t fillStallMs();
+bool     fillStallCut();             // intake being stripped right now
+uint32_t fillStallCuts();
+
 void     setFlushCap(uint32_t ms);   // 0 disables, persisted to NVS
 uint32_t flushCapMs();
 bool     flushActive();              // a 0xFF flush is being forwarded now

@@ -131,6 +131,53 @@ struct PanelOvr {
 };
 
 // ---------------------------------------------------------------------------
+// Fill-stall cutout for PANEL-run cycles
+// ---------------------------------------------------------------------------
+// Neither end of this link has a fill timeout. Measured on this machine with a
+// flow meter that had stopped counting: the panel held the intake bit for
+// 1029 s -- seventeen minutes -- waiting for a count that never arrived, and
+// raised nothing. The ESP32 cycle runner has had a guard for this since the
+// start; a cycle the PANEL runs had none at all, which is the more dangerous
+// case because it is the one people actually use.
+//
+// The dangerous failure is not a dry tank. It is a DEAD FLOW METER with water
+// still flowing: the count never advances, the target is never reached, and
+// the machine fills until something overflows. From the wire those two look
+// identical -- no pulses -- so treat them the same and stop.
+//
+// Cutting means clearing the intake bit from the forwarded panel frame and
+// latching that until the panel releases intake by itself. The drain bit is
+// left alone: on a flush that keeps the sump emptying, which is the direction
+// you want when you have just decided you cannot measure the water.
+struct FillStall {
+  uint32_t stall_ms = 0;      // 0 disables
+  uint32_t since    = 0;      // when the count last moved
+  uint8_t  last     = 0;      // last flow count seen
+  // `since` needs a separate armed flag, not a zero sentinel: millis() really
+  // is 0 for the first millisecond after boot, and treating that as "unset"
+  // silently skipped a frame -- caught by the release test below, which is
+  // exactly the window a cycle started straight after power-on would land in.
+  bool     armed    = false;
+  bool     cut      = false;  // intake is being stripped
+  uint32_t cuts     = 0;
+
+  // Call once per checksum-valid panel frame. `intake` is byte 1 BEFORE the
+  // cut is applied, or stripping the bit would clear the condition that set
+  // it. Returns true on the frame that trips it, so the caller logs once.
+  bool frame(bool intake, uint8_t flow, uint32_t now) {
+    if (!intake) { cut = false; armed = false; last = flow; return false; }
+    if (!armed || flow != last) { last = flow; since = now; armed = true; }
+    if (stall_ms && !cut && (uint32_t)(now - since) >= stall_ms) {
+      cut = true; cuts++; return true;
+    }
+    return false;
+  }
+  uint8_t apply(uint8_t b1) const {
+    return cut ? (uint8_t)(b1 & (uint8_t)~LOAD_INTAKE) : b1;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Untargeted-flush cap
 // ---------------------------------------------------------------------------
 // A panel frame carrying the INTAKE bit with fill target 0xFF is the cool-down
