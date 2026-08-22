@@ -187,6 +187,45 @@ struct FlushCap {
 };
 
 // ---------------------------------------------------------------------------
+// Frame transmit: the checksum decision, in ONE place
+// ---------------------------------------------------------------------------
+// Emits a frame byte by byte and fixes the trailing XOR if -- and only if --
+// some byte of that frame was actually rewritten.
+//
+// This exists because the relay used to make that decision inline, from an
+// ENUMERATED list of override flags: lid, status mask, flow spoof, temp
+// override. When the false-E5 filter was added as a fifth rewrite and not
+// added to the list, every masked frame went out carrying the original
+// checksum over an edited byte. The far end failed all of them and reported a
+// communication failure -- the filter caused the exact fault it was written to
+// suppress, and no test could see it because the logic lived in the relay
+// rather than here.
+//
+// The rule is now observational: `rewritten != original` means edited, so a
+// rewrite added tomorrow is covered without anyone remembering to declare it.
+// A rewrite that happens to produce the same value is NOT an edit, which keeps
+// a pass-through relay byte-for-byte transparent.
+struct FrameTx {
+  uint8_t i = 0, x = 0, len = 0;
+  bool    edit = false;
+
+  void start(uint8_t header) { i = 0; x = 0; edit = false; len = frameLenFor(header); }
+
+  // Feed the original byte and what the rewrites made of it; returns the byte
+  // to put on the wire.
+  uint8_t feed(uint8_t original, uint8_t rewritten) {
+    if (rewritten != original) edit = true;
+    uint8_t out = rewritten;
+    // Unknown header (len 0) never gets a synthesised checksum: we do not know
+    // where its frame ends, so we must stay transparent.
+    if (edit && len && i + 1 == len) out = x;
+    else x ^= out;
+    i++;
+    return out;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // False-E5 filter
 // ---------------------------------------------------------------------------
 // This controller raises status bit 6 -- the bit the panel renders as E5,

@@ -684,6 +684,141 @@ static void test_e5f_will_not_mask_with_bad_checksums(void) {
   TEST_ASSERT_FALSE(f.canDisprove());   // corruption is real evidence FOR it
 }
 
+
+// ---------------------------------------------------------------------------
+// FrameTx — the checksum decision
+// ---------------------------------------------------------------------------
+// These exist because of a shipped bug: the relay recomputed the trailing XOR
+// only when one of an ENUMERATED list of overrides was set, a new rewrite was
+// added without joining that list, and every edited frame went out with a
+// stale checksum. The far end discarded all of them and reported a comms
+// failure. The tests below are written so that ANY rewrite -- including ones
+// nobody has thought of yet -- is covered, because they assert on the emitted
+// frame rather than on which feature did the editing.
+
+// Emit a whole frame through FrameTx, applying `edits` (index -> value).
+// Returns the bytes actually put on the wire.
+static void txEmit(const uint8_t *in, uint8_t n,
+                   const int *edits, uint8_t out[16]) {
+  cn2core::FrameTx tx;
+  tx.start(in[0]);
+  for (uint8_t i = 0; i < n; i++) {
+    const uint8_t rew = (edits && edits[i] >= 0) ? (uint8_t)edits[i] : in[i];
+    out[i] = tx.feed(in[i], rew);
+  }
+}
+static bool xorValid(const uint8_t *f, uint8_t n) {
+  uint8_t x = 0;
+  for (uint8_t i = 0; i + 1 < n; i++) x ^= f[i];
+  return x == f[n - 1];
+}
+
+static const uint8_t CTRL_FRAME[8]  = {0xA2,0x19,0x00,0x02,0x04,0x0D,0x02,0xB2};
+static const uint8_t PANEL_FRAME[5] = {0xAA,0x00,0x40,0x20,0xCA};
+
+static void test_frametx_source_frames_are_themselves_valid(void) {
+  // If the fixtures were wrong every assertion below would be meaningless.
+  TEST_ASSERT_TRUE(xorValid(CTRL_FRAME, 8));
+  TEST_ASSERT_TRUE(xorValid(PANEL_FRAME, 5));
+}
+
+static void test_frametx_passthrough_is_byte_identical(void) {
+  // No edit: the ORIGINAL checksum byte must survive untouched, so a relay
+  // that rewrites nothing is transparent on the wire.
+  uint8_t out[16];
+  txEmit(CTRL_FRAME, 8, nullptr, out);
+  TEST_ASSERT_EQUAL_MEMORY(CTRL_FRAME, out, 8);
+  txEmit(PANEL_FRAME, 5, nullptr, out);
+  TEST_ASSERT_EQUAL_MEMORY(PANEL_FRAME, out, 5);
+}
+
+// THE REGRESSION TEST. This is the exact frame that shipped broken: byte 3
+// masked from 0x40 to 0x00 by the false-E5 filter, checksum left at 0xDE.
+static void test_frametx_masking_bit6_recomputes_the_checksum(void) {
+  const uint8_t in[8] = {0xA2,0x32,0x00,0x40,0x04,0x09,0x03,0xDE};
+  TEST_ASSERT_TRUE(xorValid(in, 8));
+  int edits[8] = {-1,-1,-1,0x00,-1,-1,-1,-1};
+  uint8_t out[16];
+  txEmit(in, 8, edits, out);
+  TEST_ASSERT_EQUAL_HEX8(0x00, out[3]);
+  TEST_ASSERT_NOT_EQUAL(0xDE, out[7]);      // the shipped bug: DE survived
+  TEST_ASSERT_EQUAL_HEX8(0x9E, out[7]);
+  TEST_ASSERT_TRUE(xorValid(out, 8));
+}
+
+// EXHAUSTIVE. Every payload position, every possible value: if the emitted
+// frame differs from the original anywhere, it must carry a valid checksum.
+// A rewrite added in future cannot escape this without also escaping FrameTx.
+static void test_frametx_any_single_byte_edit_stays_valid(void) {
+  uint8_t out[16];
+  for (uint8_t pos = 1; pos < 7; pos++) {
+    for (int v = 0; v < 256; v++) {
+      int edits[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+      edits[pos] = v;
+      txEmit(CTRL_FRAME, 8, edits, out);
+      TEST_ASSERT_EQUAL_HEX8((uint8_t)v, out[pos]);
+      TEST_ASSERT_TRUE_MESSAGE(xorValid(out, 8), "edited frame has a bad XOR");
+    }
+  }
+  for (uint8_t pos = 1; pos < 4; pos++) {
+    for (int v = 0; v < 256; v++) {
+      int edits[5] = {-1,-1,-1,-1,-1};
+      edits[pos] = v;
+      txEmit(PANEL_FRAME, 5, edits, out);
+      TEST_ASSERT_TRUE_MESSAGE(xorValid(out, 5), "edited panel frame bad XOR");
+    }
+  }
+}
+
+// Every SIMULTANEOUS pair too -- the lid override and the E5 filter both touch
+// byte 3, temp touches byte 1, flow byte 2, and they combine.
+static void test_frametx_multi_byte_edits_stay_valid(void) {
+  uint8_t out[16];
+  for (uint8_t a = 1; a < 7; a++)
+    for (uint8_t b = 1; b < 7; b++) {
+      int edits[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+      edits[a] = 0x5A; edits[b] = 0xA5;
+      txEmit(CTRL_FRAME, 8, edits, out);
+      TEST_ASSERT_TRUE(xorValid(out, 8));
+    }
+}
+
+static void test_frametx_rewrite_to_the_same_value_is_not_an_edit(void) {
+  // An override that writes back what was already there must leave the frame
+  // byte-identical, checksum included -- otherwise "transparent" pass-through
+  // would silently start regenerating checksums.
+  int edits[8] = {-1,-1,-1,CTRL_FRAME[3],-1,-1,-1,-1};
+  uint8_t out[16];
+  txEmit(CTRL_FRAME, 8, edits, out);
+  TEST_ASSERT_EQUAL_MEMORY(CTRL_FRAME, out, 8);
+}
+
+static void test_frametx_unknown_header_never_synthesises_a_checksum(void) {
+  // Noise and foreign traffic must pass through untouched: we do not know
+  // where such a frame ends, so no byte may be replaced by an accumulator.
+  const uint8_t junk[6] = {0x55,0x11,0x22,0x33,0x44,0x99};
+  int edits[6] = {-1,0xEE,-1,-1,-1,-1};
+  uint8_t out[16];
+  txEmit(junk, 6, edits, out);
+  TEST_ASSERT_EQUAL_HEX8(0xEE, out[1]);
+  for (uint8_t i = 2; i < 6; i++) TEST_ASSERT_EQUAL_HEX8(junk[i], out[i]);
+}
+
+static void test_frametx_restarts_cleanly_between_frames(void) {
+  // An edited frame must not leave `edit` set and make the NEXT, untouched
+  // frame regenerate its checksum.
+  cn2core::FrameTx tx;
+  tx.start(CTRL_FRAME[0]);
+  for (uint8_t i = 0; i < 8; i++)
+    tx.feed(CTRL_FRAME[i], i == 3 ? 0x00 : CTRL_FRAME[i]);
+  TEST_ASSERT_TRUE(tx.edit);
+  tx.start(CTRL_FRAME[0]);
+  TEST_ASSERT_FALSE(tx.edit);
+  uint8_t out[8];
+  for (uint8_t i = 0; i < 8; i++) out[i] = tx.feed(CTRL_FRAME[i], CTRL_FRAME[i]);
+  TEST_ASSERT_EQUAL_MEMORY(CTRL_FRAME, out, 8);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -767,6 +902,15 @@ int main(int, char **) {
   RUN_TEST(test_e5f_will_not_mask_a_fault_it_earned);
   RUN_TEST(test_e5f_will_not_mask_on_a_stale_link);
   RUN_TEST(test_e5f_will_not_mask_with_bad_checksums);
+
+  RUN_TEST(test_frametx_source_frames_are_themselves_valid);
+  RUN_TEST(test_frametx_passthrough_is_byte_identical);
+  RUN_TEST(test_frametx_masking_bit6_recomputes_the_checksum);
+  RUN_TEST(test_frametx_any_single_byte_edit_stays_valid);
+  RUN_TEST(test_frametx_multi_byte_edits_stay_valid);
+  RUN_TEST(test_frametx_rewrite_to_the_same_value_is_not_an_edit);
+  RUN_TEST(test_frametx_unknown_header_never_synthesises_a_checksum);
+  RUN_TEST(test_frametx_restarts_cleanly_between_frames);
 
   RUN_TEST(test_end_to_end_forced_intake_motor);
   RUN_TEST(test_thinned_stream_emits_whole_frames);

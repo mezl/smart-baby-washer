@@ -100,7 +100,7 @@ static int16_t  s_p2_ovr = -1, s_p3_ovr = -1;
 static uint8_t  s_press_mask = 0;
 static uint32_t s_press_until = 0;
 static uint8_t  s_pb_i = 0, s_pb_x = 0;
-static bool     s_pb_edit = false;   // any byte of the in-flight panel frame rewritten
+static cn2core::FrameTx s_pb_tx;    // checksum decision, panel->controller
 static uint32_t s_pb_prev = 0;
 static uint8_t  s_panel_b1 = 0, s_panel_b2 = 0, s_panel_b3 = 0;
 // Byte 1 as FORWARDED, i.e. what the controller is actually told to energise.
@@ -189,9 +189,9 @@ static void deltaCheck(uint8_t side, const uint8_t *f, uint8_t n) {
   memcpy(d.b, f, d.n); d.first_ms = millis(); d.count = 1;
 }
 static uint8_t  s_bp_i = 0;             // index within the current board frame
-// True once any byte of the in-flight controller frame has been rewritten, so
-// the trailing checksum is recomputed. See the comment at its use.
-static bool     s_bp_edit = false;
+// The checksum decision for the controller->panel direction. cn2core owns it
+// so it is exercised on the host; see cn2core::FrameTx.
+static cn2core::FrameTx s_bp_tx;
 static uint8_t  s_bp_x = 0;             // XOR of bytes we have actually SENT
 static uint32_t s_bp_prev = 0;   // bytes actually written out: [0]=to board, [1]=to panel
 
@@ -572,7 +572,7 @@ static void pump() {
     uint8_t b = (uint8_t)uBoard.read();
     uint32_t now_us = micros();
     if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) {
-      s_bp_i = 0; s_bp_x = 0; s_bp_edit = false;
+      s_bp_i = 0; s_bp_x = 0;
       fwFlush(0);                    // stale partial goes out before the new frame
     }
     s_bp_prev = now_us;
@@ -633,9 +633,8 @@ static void pump() {
     //
     // A list of "ways a byte might change" goes stale the next time someone
     // adds a rewrite. Watching whether the byte actually changed cannot.
-    if (out != b) s_bp_edit = true;
-    if (s_bp_edit && s_bp_i == 7) out = s_bp_x;
-    else s_bp_x ^= out;
+    if (s_bp_i == 0) s_bp_tx.start(b);
+    out = s_bp_tx.feed(b, out);
     s_bp_i++;
 
     // While the virtual controller is running we must NOT also forward the real
@@ -653,7 +652,7 @@ static void pump() {
 
     uint32_t nu = micros();
     if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) {
-      s_pb_i = 0; s_pb_x = 0; s_pb_edit = false;
+      s_pb_i = 0; s_pb_x = 0;
       fwFlush(1);
     }
     s_pb_prev = nu;
@@ -691,12 +690,9 @@ static void pump() {
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
-    // Same rule as the controller direction: observed edit, not a flag list.
-    // po.active() happens to cover every rewrite on this side today, but the
-    // flush cap already subtracts a bit it knows nothing about.
-    if (out != b) s_pb_edit = true;
-    if (s_pb_edit && s_pb_i == 4) out = s_pb_x;
-    else s_pb_x ^= out;
+    // Same single implementation as the controller direction.
+    if (s_pb_i == 0) s_pb_tx.start(b);
+    out = s_pb_tx.feed(b, out);
     s_pb_i++;
 
     // While impersonating the panel we must NOT also forward the real one, or
