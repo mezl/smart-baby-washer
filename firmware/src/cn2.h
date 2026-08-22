@@ -58,6 +58,10 @@ uint32_t spoofCount();
 // Worst observed interval between forwarding passes. If this climbs into the
 // milliseconds the relay is being starved and the board will flag E5.
 uint32_t worstGapUs();
+// millis() at which that worst gap was recorded. A stall during WiFi
+// association is harmless once the machine's startup handshake is already
+// done, and dangerous before it -- the size alone cannot tell you which.
+uint32_t worstGapAtMs();
 // Bytes actually written out by write(): TO_BOARD / TO_PANEL. If this is not
 // climbing, the firmware is not transmitting and no amount of rewiring helps.
 uint32_t txCount(uint8_t dest);
@@ -349,6 +353,12 @@ String  baselineHex(uint8_t side);
 // that persists, so the session's distinct frames stay visible.
 String  histJson(uint8_t side);
 void    histClear();
-void     resetGap();
+void     resetGap();   // clears the worst-gap high-water mark
+
+// Block until BOTH ends have been heard from with good checksums, or until the
+// timeout. Yields throughout, so relayTask keeps forwarding while we wait.
+// Returns false on timeout, which is not fatal -- it only means the link was
+// quiet, e.g. on a bench with no machine attached.
+bool     waitLinkSettled(uint16_t frames, uint32_t timeout_ms);
 
 }  // namespace cn2

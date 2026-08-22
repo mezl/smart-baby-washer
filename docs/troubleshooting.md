@@ -286,6 +286,29 @@ curl -s http://baby-washer.local/api/status |
 each other at all — the machine will show `E5` and refuse to run. It is not a
 broken appliance; power-cycle to clear the boot-loop guard.
 
+### Forwarding stalls
+
+`worst_gap_us` is the longest the relay task went between forwarding passes —
+1 ms in steady state. `worst_gap_at` says **when**, in millis from boot, which is
+the half that matters: WiFi association starves the task for ~96 ms and there is
+no stopping that, but ~96 ms is eleven byte times at 9600 baud and wide enough to
+split a frame at whichever end is mid-transmission. Landing in the window the
+panel and controller use to find each other is a different thing from landing
+afterwards.
+
+So the firmware forwards on a quiet link until ten good frames have arrived each
+way (~2 s) and only then brings up the radio. Measured after the change: worst
+gap 96.2 ms at **t=3.69 s**, clear of the startup window. Both counters reset
+with `POST /api/qclear`.
+
+⚠️ **A weak radio used to take the panel link down with it.** `net::loop()`
+restarts the board after 60 s without WiFi, and every restart drops forwarding
+for a whole boot — long enough for a panel to latch `E5`, which then needs an
+appliance power cycle to clear, to recover a radio a restart usually cannot fix.
+From 1.2.0 the restart only fires when the CN2 link has gone idle too; while
+frames are flowing it re-kicks the supplicant indefinitely and logs that it is
+holding off. Check `rssi`: −59 dBm is comfortable, −78 is not.
+
 If the link is clean and `st_real` is `0x00` but the panel still shows `E5`,
 power-cycle the machine. If `E5` comes straight back, take the module out of the
 loop — panel plugged directly into the controller — and power on. Clean without

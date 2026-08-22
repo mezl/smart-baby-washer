@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.1.0"
+#define FW_VERSION  "1.2.0"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -15,7 +15,12 @@
 
 #define WIFI_CONNECT_TIMEOUT_MS   20000UL   // stop *blocking* after this...
 #define WIFI_RETRY_MS             10000UL   // ...then re-kick the supplicant
-#define WIFI_REBOOT_AFTER_MS      60000UL   // ...and finally reboot
+#define WIFI_REBOOT_AFTER_MS      60000UL   // ...and finally reboot, but only
+                                            // if the CN2 link is idle too
+// How quiet the panel link must be before a WiFi restart is allowed to take it
+// down with it. Both ends broadcast every ~200 ms, so 3 s is fifteen missed
+// frames -- by then there is no link left to protect.
+#define WIFI_REBOOT_LINK_IDLE_MS  3000UL
 
 // ---- Robustness ------------------------------------------------------------
 // The task watchdog is deliberately slack. It exists to catch a wedged loop(),
@@ -154,6 +159,23 @@
 // cycle runner's own longest (116 s), so it cannot truncate normal operation.
 // Settable at runtime via POST /api/flushcap; 0 disables.
 #define FLUSH_CAP_MS_DEFAULT  180000UL
+
+// ---------------------------------------------------------------------------
+// Hold WiFi off until the panel link is up and quiet
+// ---------------------------------------------------------------------------
+// Opening the UARTs before WiFi removed the 4 s blackout at power-on, but it
+// also put relayTask on the air DURING association -- and association starves
+// it. Measured on the first boot after that reorder: worst gap between pump()
+// passes 95.9 ms, against 1 ms in steady state. 96 ms is eleven byte times at
+// 9600 baud, wide enough to split a frame at whichever end is mid-transmission,
+// and it lands squarely in the window the panel and controller use to find each
+// other.
+//
+// So forward on a quiet link first, and only then bring up the radio. Ten good
+// frames each way is two seconds at the 200 ms broadcast rate. The timeout is
+// what stops a bench board with no machine attached waiting forever.
+#define LINK_SETTLE_FRAMES      10
+#define LINK_SETTLE_TIMEOUT_MS  5000UL
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

@@ -11,6 +11,7 @@
 namespace net {
 
 static uint32_t s_lost_since = 0;
+static uint32_t s_last_hold  = 0;   // rate-limits the "holding off" log line
 
 // ---------------------------------------------------------------------------
 // The OTA callbacks are what make this survivable.
@@ -117,10 +118,31 @@ void loop() {
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
       Serial.println("[wifi] re-issuing join");
     }
+    // Restarting to fix WiFi costs the CN2 link, and on a board sealed inside
+    // an appliance that is the wrong way round: the link is the machine's
+    // actual function, OTA is a convenience. A reboot drops forwarding for the
+    // whole boot, which is long enough for a panel to latch E5 -- a fault the
+    // owner then has to power-cycle the appliance to clear, to recover a radio
+    // that a restart usually cannot fix anyway (a down AP stays down).
+    //
+    // So only restart when the link has nothing left to lose. While frames are
+    // still flowing, keep re-kicking the supplicant forever instead; autoreconnect
+    // will take it when the AP returns.
+    const bool link_alive =
+        cn2::lastByteAgeMs(cn2::FROM_PANEL) < WIFI_REBOOT_LINK_IDLE_MS ||
+        cn2::lastByteAgeMs(cn2::FROM_BOARD) < WIFI_REBOOT_LINK_IDLE_MS;
     if (now - s_lost_since > WIFI_REBOOT_AFTER_MS) {
-      Serial.println("[wifi] still down — restarting");
-      delay(200);
-      ESP.restart();
+      if (link_alive) {
+        if (now - s_last_hold > 60000UL) {
+          s_last_hold = now;
+          Serial.println("[wifi] still down, but the CN2 link is live — "
+                         "holding off the restart");
+        }
+      } else {
+        Serial.println("[wifi] still down and the CN2 link is idle — restarting");
+        delay(200);
+        ESP.restart();
+      }
     }
   } else if (s_lost_since) {
     Serial.printf("[wifi] back after %lu ms  ip=%s\n",

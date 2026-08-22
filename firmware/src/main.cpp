@@ -85,6 +85,23 @@ void setup() {
   bootGuard();
   g_boot_ms = millis();
 
+  // ---- WATCHDOG BEFORE THE PAYLOAD, NOT AFTER ----------------------------
+  //
+  // It used to be armed at the end of setup(), which was fine while the
+  // payload started last: WiFi and OTA were already up, so a hang still left a
+  // way in. Starting the CN2 link first inverted that. Everything from
+  // cn2::begin() to net::begin() now runs BEFORE the radio, and a hang anywhere
+  // in there would sit forever with no watchdog to reset it and no OTA to
+  // recover through.
+  //
+  // This board is screwed inside an appliance. There is no serial port to
+  // attach and no button to hold, so "reachable over WiFi" is the only recovery
+  // path that exists and nothing may be allowed to run ahead of it unguarded.
+  //
+  // Armed here, any hang panics, resets, and costs a boot-loop strike. Three
+  // strikes and safe mode skips the payload entirely, leaving WiFi and OTA.
+  armWatchdog();
+
   // ---- THE PANEL LINK COMES UP FIRST -------------------------------------
   //
   // This module is powered from CN2 pin 4, so it boots at the same instant as
@@ -120,9 +137,13 @@ void setup() {
                   (unsigned long)millis());
   }
 
+  // Let the machine's own startup handshake complete on a link that nothing is
+  // stalling, THEN bring up the radio. See LINK_SETTLE_* in config.h.
+  if (!g_safe_mode) cn2::waitLinkSettled(LINK_SETTLE_FRAMES, LINK_SETTLE_TIMEOUT_MS);
+
   // Now the slow parts, with the link already carrying traffic.
   uint32_t t0 = millis();
-  while (!Serial && millis() - t0 < 1500) delay(10);
+  while (!Serial && millis() - t0 < 1500) { esp_task_wdt_reset(); delay(10); }
 
   Serial.printf("\n=== %s %s (%s %s) ===\n", FW_NAME, FW_VERSION, __DATE__,
                 __TIME__);
@@ -133,7 +154,6 @@ void setup() {
   net::begin();
   web::begin();
 
-  armWatchdog();
 }
 
 void loop() {

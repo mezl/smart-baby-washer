@@ -1,4 +1,6 @@
 #include "cn2.h"
+
+#include <esp_task_wdt.h>
 #include <ctype.h>
 #include <cn2core.h>
 
@@ -270,6 +272,7 @@ static inline void flowEvent(uint8_t count) {
   if (s_fev_len < 256) s_fev_len++;
 }
 static uint32_t s_late_us = 0;      // worst observed gap between pump() passes
+static uint32_t s_late_at = 0;      // millis() when that worst gap was recorded
 
 // On the C3 with a USB-CDC console, both hardware UARTs are free. Serial is the
 // USB device; Serial0 is hardware UART0.
@@ -1494,7 +1497,7 @@ static void relayTask(void *) {
   for (;;) {
     uint32_t now = micros();
     uint32_t gap = now - prev;
-    if (gap > s_late_us) s_late_us = gap;
+    if (gap > s_late_us) { s_late_us = gap; s_late_at = millis(); }
     prev = now;
     pump();
     wsrService();     // after pump(): acts on the b0 we have just forwarded
@@ -1510,6 +1513,27 @@ static void relayTask(void *) {
 }
 
 uint32_t worstGapUs() { return s_late_us; }
+uint32_t worstGapAtMs() { return s_late_at; }
+
+// s_ok[] is written by relayTask and read here from the Arduino task. A 32-bit
+// aligned load is atomic on RV32 and we only ever compare it against a
+// threshold, so a torn read is not possible and a stale one costs one poll.
+bool waitLinkSettled(uint16_t frames, uint32_t timeout_ms) {
+  const uint32_t t0 = millis();
+  while ((uint32_t)(millis() - t0) < timeout_ms) {
+    if (s_ok[0] >= frames && s_ok[1] >= frames) {
+      Serial.printf("[cn2  ] link settled: %u+ good frames both ways in %lu ms\n",
+                    (unsigned)frames, (unsigned long)(millis() - t0));
+      return true;
+    }
+    esp_task_wdt_reset();   // armed before the payload now; do not starve it
+    delay(20);          // yields; relayTask is priority 10 and runs freely
+  }
+  Serial.printf("[cn2  ] link did not settle in %lu ms (ctrl %lu, panel %lu good)"
+                " — continuing\n", (unsigned long)timeout_ms,
+                (unsigned long)s_ok[0], (unsigned long)s_ok[1]);
+  return false;
+}
 uint32_t txCount(uint8_t dest) { return dest < 2 ? s_tx[dest] : 0; }
 
 // Toggled from an esp_timer at twice the requested frequency: one full pulse

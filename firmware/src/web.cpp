@@ -1355,6 +1355,7 @@ static String statusJson() {
   j += ",\"spoof_sent\":" + String(cn2::spoofCount());
   j += ",\"spoof_frame\":\"" + cn2::spoofFrameHex() + "\"";
   j += ",\"worst_gap_us\":" + String(cn2::worstGapUs());
+  j += ",\"worst_gap_at\":" + String(cn2::worstGapAtMs());
   j += ",\"tx_to_board\":" + String(cn2::txCount(cn2::TO_BOARD));
   j += ",\"tx_to_panel\":" + String(cn2::txCount(cn2::TO_PANEL));
   j += ",\"flow_hz\":" + String(cn2::flowHz());
@@ -1866,6 +1867,7 @@ void begin() {
 
   s_server.on("/api/qclear", HTTP_POST, []() {
     cn2::qualityClear();
+    cn2::resetGap();   // the worst-gap mark is part of link quality
     s_server.send(200, "application/json", "{\"ok\":true}");
   });
 

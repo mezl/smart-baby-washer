@@ -9,8 +9,8 @@ board is going to live inside an appliance.
     python3 tools/ota_smoke_test.py --no-upload    # reachability + auth only
 
 Env:
-    WASHER_HOST         default "baby-washer.local"
-    OTA_PASSWORD    required — must match include/secrets.h
+    D8_HOST         default "baby-washer.local"
+    OTA_PASSWORD    required — the value from include/secrets.h
 """
 import argparse
 import hashlib
@@ -20,8 +20,11 @@ import time
 import urllib.error
 import urllib.request
 
-HOST = os.environ.get("WASHER_HOST", "baby-washer.local")
-KEY = os.environ.get("OTA_PASSWORD", "change-me")
+HOST = os.environ.get("D8_HOST", "baby-washer.local")
+# No default: a fallback here is a credential in the repository.
+KEY = os.environ.get("OTA_PASSWORD")
+if not KEY:
+    raise SystemExit("set OTA_PASSWORD (the value from include/secrets.h)")
 BASE = f"http://{HOST}"
 
 results = []
@@ -104,7 +107,9 @@ def main():
     # 2. status endpoint sane
     try:
         s = get_json("/api/status")
-        check("status endpoint", True, f"mode={s['mode']} baud={s['baud']} rssi={s['rssi']}")
+        check("status endpoint", True,
+              f"{'RELAY' if s.get('open') else 'LISTEN'} baud={s['baud']} "
+              f"rssi={s['rssi']} ok {s['ok_c']}/{s['ok_p']} bad {s['bad_c']}/{s['bad_p']}")
     except Exception as e:
         check("status endpoint", False, str(e))
 
@@ -153,7 +158,9 @@ def main():
     # 7. and the payload still runs
     try:
         s = get_json("/api/status")
-        check("cn2 link running after update", s.get("open") is True, f"mode={s['mode']}")
+        check("cn2 link running after update", s.get("open") is True,
+              f"forwarding {s['tx_to_board']}B to board, {s['tx_to_panel']}B to panel, "
+              f"{s['bad_c']}/{s['bad_p']} bad")
     except Exception as e:
         check("cn2 link running after update", False, str(e))
 
