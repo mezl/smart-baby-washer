@@ -77,6 +77,17 @@ def hold_flush(b2, b3, secs, label):
 
 print(f"flush-cap test against {HOST}")
 base = st()
+
+# The flush cap and pb1_fwd landed in 1.1.0. Older firmware answers /api/status
+# quite happily without them, and every check below would then die on a
+# KeyError that says nothing about the real problem.
+NEEDED = ("fcap_ms", "flush_on", "flush_ms", "flush_cap", "flush_n", "pb1_fwd")
+missing = [k for k in NEEDED if k not in base]
+if missing:
+    v = req("/api/version")
+    sys.exit(f"ABORT: {HOST} is running {v['name']} {v['version']}, which has no "
+             f"flush cap (missing {', '.join(missing)}). Needs 1.1.0 or later.")
+
 if base["pb1"] or base.get("cyc_state") == 1:
     sys.exit(f"ABORT: the machine is not idle (pb1=0x{base['pb1']:02X}). "
              "Run this with nothing going on.")

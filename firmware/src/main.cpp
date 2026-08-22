@@ -82,11 +82,47 @@ static void armWatchdog() {
 
 void setup() {
   Serial.begin(115200);
-  uint32_t t0 = millis();
-  while (!Serial && millis() - t0 < 1500) delay(10);
-
   bootGuard();
   g_boot_ms = millis();
+
+  // ---- THE PANEL LINK COMES UP FIRST -------------------------------------
+  //
+  // This module is powered from CN2 pin 4, so it boots at the same instant as
+  // the panel and the controller -- and until cn2::begin() runs, the UARTs are
+  // shut and both TX pins float. Everything either end says in that window goes
+  // into a disconnected wire.
+  //
+  // Two waits used to sit in front of it and together they cost 4.0 s, measured
+  // on a live machine from the forwarded byte counts:
+  //
+  //   * `while (!Serial ...)` -- 1.5 s. Inside an appliance there is no USB
+  //     host, so it always ran to full timeout.
+  //   * net::begin() -- blocks on association for up to
+  //     WIFI_CONNECT_TIMEOUT_MS. Nominally ~2.5 s; with the AP down, 20 s.
+  //
+  // Four seconds is long enough for a newer D8's controller to decide the panel
+  // is not there. It raises the comms-failure bit, the panel LATCHES E5, and no
+  // amount of perfect relaying afterwards clears it -- only a power cycle does.
+  //
+  // The old order existed so a crashing payload still left OTA listening. The
+  // boot-loop guard already covers that: three boots without a healthy uptime
+  // and safe mode disables the payload entirely. Opening two UARTs is not the
+  // risky part; relayTask is, and the guard is what catches it.
+  //
+  // relayTask runs at priority 10 against the Arduino loop task's 1, and both
+  // waits below yield, so the link keeps relaying all the way through them.
+  if (g_safe_mode) {
+    Serial.println("[boot ] SAFE MODE — CN2 link disabled, OTA only. "
+                   "Power-cycle to clear.");
+  } else {
+    cn2::begin();
+    Serial.printf("[cn2  ] link open %lu ms after boot\n",
+                  (unsigned long)millis());
+  }
+
+  // Now the slow parts, with the link already carrying traffic.
+  uint32_t t0 = millis();
+  while (!Serial && millis() - t0 < 1500) delay(10);
 
   Serial.printf("\n=== %s %s (%s %s) ===\n", FW_NAME, FW_VERSION, __DATE__,
                 __TIME__);
@@ -94,17 +130,8 @@ void setup() {
                 (int)esp_reset_reason(), (unsigned long)g_boot_count,
                 g_safe_mode ? "   ** SAFE MODE **" : "");
 
-  // Network first, always. If the payload is going to take the board down, it
-  // should at least take it down with OTA already listening.
   net::begin();
   web::begin();
-
-  if (g_safe_mode) {
-    Serial.println("[boot ] SAFE MODE — CN2 link disabled, OTA only. "
-                   "Power-cycle to clear.");
-  } else {
-    cn2::begin();
-  }
 
   armWatchdog();
 }

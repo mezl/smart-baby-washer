@@ -239,3 +239,49 @@ is stored on the ESP32, so an uncaptured run tells you nothing afterwards.
 If the cycle **stalls** at step 5, the controller wants something else to end
 that stage and the cap is the wrong lever — set `ms=0`, open an issue with the
 log, and bound the water supply in hardware instead.
+
+## 9. `E5` on the panel right after power-on
+
+`E5` is *Communication Failure*, and it **latches at the panel** — once raised it
+stays on the display until the machine is power-cycled, however healthy the link
+becomes afterwards. So the first question is never "why is E5 showing" but
+"is anything still causing it".
+
+Check `/api/status`:
+
+| Field | What it means |
+|---|---|
+| `st_real` | the controller's **own** status byte. `0x40` = it is asserting the comms fault right now. `0x00` = it is happy and the panel display is just stale |
+| `st_set` | non-zero means **you** are injecting the bit — clear it with `/api/status_ovr?clr=0&set=0` |
+| `bad_c` / `bad_p` | anything above zero is a corrupted byte on the wire |
+| `tx_to_board` vs `panel_bytes` | must be equal — every byte received is forwarded |
+| `tx_to_panel` vs `board_bytes` | likewise, the other direction |
+
+`/api/hist` gives the same in order. Its `first` column is an **age in seconds,
+not a timestamp**, so read it descending to get chronological order — that is
+what tells you whether the fault was there from the first frame or arrived later.
+
+⚠️ **This module is powered from CN2 pin 4**, so it boots at the same instant as
+the panel and the controller, and until its UARTs open both TX pins float.
+Firmware before **1.1.0** opened them *after* a 1.5 s `while (!Serial)` wait and
+a blocking WiFi association — a measured **4.0 s** with the panel link dead at
+every power-on, and up to 20 s with the access point down. Newer D8 controllers
+raise a comms fault over that. 1.1.0 opens the link first; the same measurement
+now reads **0.0 s**. Check with `/api/version`.
+
+Measure it yourself — the byte counters are exact:
+
+```bash
+# dead window = uptime - (bytes / steady rate).  Controller 40 B/s, panel 25 B/s.
+curl -s http://baby-washer.local/api/status |
+  python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["uptime_s"]-d["board_bytes"]/40)'
+```
+
+⚠️ **Safe mode leaves the UARTs shut**, so the panel and controller cannot reach
+each other at all — the machine will show `E5` and refuse to run. It is not a
+broken appliance; power-cycle to clear the boot-loop guard.
+
+If the link is clean and `st_real` is `0x00` but the panel still shows `E5`,
+power-cycle the machine. If `E5` comes straight back, take the module out of the
+loop — panel plugged directly into the controller — and power on. Clean without
+it means the problem is in our path; `E5` anyway means it is the machine.
