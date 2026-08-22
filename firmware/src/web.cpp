@@ -366,7 +366,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
   <div class=box><b>CONTROLLER &rarr; PANEL</b>
     <table><tr><td class=lbl>frame</td><td id=fb class=mono></td></tr></table>
     <div id=fbleg style="margin-top:2px"></div>
-    <div class=lbl style="margin-top:6px">byte3 status bits</div>
+    <div class=lbl style="margin-top:6px" title="These are the CONTROLLER's own bits, before any filtering. The MACHINE line above shows what the panel is actually told, which is what the appliance displays. They differ whenever the false-E5 filter is masking -- that is the filter working, not a fault.">byte3 status bits <span class=mut>(as sent by the controller)</span></div>
     <div class=bits id=bits></div>
     <div class=lbl style="margin-top:5px" id=stshow></div>
     <div style="margin-top:6px">
@@ -1105,8 +1105,13 @@ async function tick(){
   const st=s.st_fwd||0, re=s.st_real||0;
   // "Running" is read off the panel's load bitmap, not off a status bit. There
   // is no RUN flag on this link: byte 3 bit 0 was tried and falsified.
-  $('state').innerHTML=(re&0x40)?'<span class=bad>E5</span>':(s.pb1)
+  // st is the byte the panel actually receives; re is what the controller
+  // sent. Headline the panel's view so this card matches the appliance.
+  $('state').innerHTML=(st&0x40)?'<span class=bad>E5</span>':(s.pb1)
     ?'<span class=ok>'+phaseName(s.pb1)+'</span>':'<span class=mut>IDLE</span>';
+  $('state').title=(re!==st)
+    ?'controller sent 0x'+re.toString(16)+', panel is being told 0x'+st.toString(16)
+    :'';
   const mmss=t=>{t=Math.max(0,t|0);return ((t/60)|0)+':'+String(t%60).padStart(2,'0')};
 
   $('bits').innerHTML=[7,6,5,4,3,2,1,0].map(k=>
@@ -1696,7 +1701,12 @@ void begin() {
   // Deliberately not /api/status: that is 40+ fields of engineering state, and
   // the app polls once a second.
   s_server.on("/api/app", HTTP_GET, []() {
-    const uint8_t st = cn2::statusReal();
+    // What the PANEL is told, not what the controller said. Those differ
+    // whenever the false-E5 filter is masking, and the app must agree with the
+    // appliance in front of the user: reporting an error the machine is not
+    // showing is worse than reporting none at all. The raw byte stays visible
+    // on the engineering page, which is where a discrepancy belongs.
+    const uint8_t st = cn2::statusFwd();
     const uint8_t s3 = cn2::cycleState();
     String j = "{\"state\":" + String(s3) +
                ",\"mode\":" + String(cn2::cycleMode()) +
