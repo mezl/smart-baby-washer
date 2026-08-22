@@ -1041,6 +1041,61 @@ static void test_fillstall_survives_millis_rollover(void) {
   TEST_ASSERT_TRUE(f.frame(true, 0, (uint32_t)(t0 + 1000)));
 }
 
+
+// ---------------------------------------------------------------------------
+// HeatCeiling — the guard that replaces a masked status bit 6
+// ---------------------------------------------------------------------------
+static void test_heatceiling_allows_the_captured_steam_phase(void) {
+  // A real captured cycle on this machine reached 99 C in steam. A ceiling
+  // that cuts there would break normal operation, so this is the test that
+  // stops anyone "tightening" it into uselessness.
+  cn2core::HeatCeiling h; h.ceiling_c = 105; h.release_c = 95;
+  for (uint8_t t = 20; t <= 99; t++)
+    TEST_ASSERT_FALSE(h.frame(0x04, t));
+  TEST_ASSERT_FALSE(h.cut);
+  TEST_ASSERT_EQUAL_HEX8(0x04, h.apply(0x04));
+}
+
+static void test_heatceiling_cuts_only_the_heater_bits(void) {
+  cn2core::HeatCeiling h; h.ceiling_c = 105; h.release_c = 95;
+  TEST_ASSERT_TRUE(h.frame(0x05, 105));          // wash pump + water heat
+  // The wash pump must KEEP running: circulation is what moves heat away from
+  // the element. Cutting it here would be the opposite of safe.
+  TEST_ASSERT_EQUAL_HEX8(0x01, h.apply(0x05));
+  TEST_ASSERT_EQUAL_HEX8(0x22, h.apply(0x2A));   // drain+intake survive, air heat goes
+}
+
+static void test_heatceiling_fires_once_and_holds(void) {
+  cn2core::HeatCeiling h; h.ceiling_c = 105; h.release_c = 95;
+  uint32_t trips = 0;
+  for (uint8_t t = 105; t <= 120; t++) if (h.frame(0x04, t)) trips++;
+  TEST_ASSERT_EQUAL_UINT32(1, trips);
+  TEST_ASSERT_TRUE(h.cut);
+}
+
+static void test_heatceiling_hysteresis_prevents_chatter(void) {
+  // Releasing at the ceiling would let the heater re-arm every frame around
+  // the threshold, which is how a relay gets destroyed.
+  cn2core::HeatCeiling h; h.ceiling_c = 105; h.release_c = 95;
+  h.frame(0x04, 105);
+  TEST_ASSERT_TRUE(h.cut);
+  for (uint8_t t = 104; t >= 95; t--) { h.frame(0x04, t); TEST_ASSERT_TRUE(h.cut); }
+  h.frame(0x04, 94);
+  TEST_ASSERT_FALSE(h.cut);                      // only well below does it resume
+}
+
+static void test_heatceiling_zero_disables(void) {
+  cn2core::HeatCeiling h; h.ceiling_c = 0;
+  for (uint8_t t = 0; t < 255; t++) TEST_ASSERT_FALSE(h.frame(0x04, t));
+  TEST_ASSERT_FALSE(h.cut);
+}
+
+static void test_heatceiling_ignores_frames_with_no_heater(void) {
+  cn2core::HeatCeiling h; h.ceiling_c = 105; h.release_c = 95;
+  TEST_ASSERT_FALSE(h.frame(0x20, 120));         // intake only, however hot
+  TEST_ASSERT_FALSE(h.cut);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -1091,6 +1146,13 @@ int main(int, char **) {
   RUN_TEST(test_isDriven_threshold);
   RUN_TEST(test_resolveRx_both_orders);
   RUN_TEST(test_resolveRx_refuses_ambiguous_input);
+
+  RUN_TEST(test_heatceiling_allows_the_captured_steam_phase);
+  RUN_TEST(test_heatceiling_cuts_only_the_heater_bits);
+  RUN_TEST(test_heatceiling_fires_once_and_holds);
+  RUN_TEST(test_heatceiling_hysteresis_prevents_chatter);
+  RUN_TEST(test_heatceiling_zero_disables);
+  RUN_TEST(test_heatceiling_ignores_frames_with_no_heater);
 
   RUN_TEST(test_fillstall_normal_fill_is_never_cut);
   RUN_TEST(test_fillstall_slow_fill_is_never_cut);

@@ -1426,6 +1426,9 @@ static String statusJson() {
   j += ",\"e5f_leaks\":" + String(cn2::e5FilterLeaks());
   j += ",\"e5f_doubt\":" + String(cn2::e5FilterDoubt());
   j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
+  j += ",\"hceil_c\":" + String(cn2::heatCeilingC());
+  j += ",\"hceil_cut\":" + String(cn2::heatCeilingCut() ? "true" : "false");
+  j += ",\"hceil_n\":" + String(cn2::heatCeilingCuts());
   j += ",\"fstall_ms\":" + String(cn2::fillStallMs());
   j += ",\"fstall_cut\":" + String(cn2::fillStallCut() ? "true" : "false");
   j += ",\"fstall_n\":" + String(cn2::fillStallCuts());
@@ -1600,6 +1603,15 @@ void begin() {
       ",\"pin\":" + String(cn2::wsRelayPin()) +
       ",\"low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false") +
       ",\"why\":\"" + String(cn2::wsRelayWhy()) + "\"}");
+  });
+
+  //   POST /api/heatceiling?c=105      (0 disables)
+  s_server.on("/api/heatceiling", HTTP_POST, []() {
+    if (s_server.hasArg("c")) cn2::setHeatCeiling((uint8_t)s_server.arg("c").toInt());
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"c\":" + String(cn2::heatCeilingC()) +
+      ",\"cut\":" + String(cn2::heatCeilingCut() ? "true" : "false") +
+      ",\"cuts\":" + String(cn2::heatCeilingCuts()) + "}");
   });
 
   //   POST /api/fillstall?ms=120000    (0 disables)

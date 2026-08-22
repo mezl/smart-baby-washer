@@ -182,6 +182,13 @@ int8_t  wsRelayPin();
 // a dead flow meter. Strips the intake bit when the count stops advancing.
 void     setFillStall(uint32_t ms);  // 0 disables, persisted to NVS
 uint32_t fillStallMs();
+
+// ---- heater ceiling (panel-run cycles) ------------------------------------
+// The replacement guard for masking status bit 6. See cn2core::HeatCeiling.
+void     setHeatCeiling(uint8_t c);  // 0 disables, persisted
+uint8_t  heatCeilingC();
+bool     heatCeilingCut();
+uint32_t heatCeilingCuts();
 bool     fillStallCut();             // intake being stripped right now
 uint32_t fillStallCuts();
 

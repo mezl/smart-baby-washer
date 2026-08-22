@@ -124,6 +124,7 @@ static uint8_t  s_panel_b3_fwd = 0;
 // is only the wiring.
 static cn2core::FlushCap s_fcap;
 static cn2core::FillStall s_fstall;   // panel-run fill guard; see cn2core
+static cn2core::HeatCeiling s_heat;   // panel-run heater backstop
 static uint8_t  s_e5f_mode = E5F_AUTO;   // false-E5 filter; see e5FilterActive()
 static uint32_t s_wifi_delay = 0;   // radio hold at boot; see setWifiDelayMs()
 // PROBE mode: the controller is fed a permanently idle panel frame while the
@@ -362,6 +363,8 @@ void begin() {
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
   s_fcap.cap_ms    = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
   s_fstall.stall_ms = s_prefs.getULong("fstall", FILL_STALL_MS_DEFAULT);
+  s_heat.ceiling_c  = s_prefs.getUChar("hceil", HEAT_CEILING_C);
+  s_heat.release_c  = HEAT_RELEASE_C;
   s_wifi_delay  = s_prefs.getULong("wifid", 0);
   s_e5f_mode    = s_prefs.getUChar("e5f", E5F_AUTO);
   if (s_e5f_mode > E5F_FORCE) s_e5f_mode = E5F_AUTO;
@@ -745,6 +748,7 @@ static void pump() {
       s_panel_b1_want = out;
       out = s_fcap.apply(out);                  // drop intake, leave drain
       out = s_fstall.apply(out);                // ...and if water never came
+      out = s_heat.apply(out);                  // ...and above the heat ceiling
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
@@ -2074,6 +2078,11 @@ static void flushFrame() {
   s_fcap_okprev = s_asm[1].ok;
   if (!valid) return;                     // a bad frame proves nothing
 
+  if (s_heat.frame(s_panel_b1_want, (uint8_t)(s_temp_real & 0x7F)))
+    Serial.printf("[heat ] %u C >= ceiling %u — heater bits stripped until %u C\n",
+                  (unsigned)(s_temp_real & 0x7F), (unsigned)s_heat.ceiling_c,
+                  (unsigned)s_heat.release_c);
+
   const bool stalled = s_fstall.frame((s_panel_b1_want & 0x20) != 0,
                                       s_flow_real, millis());
   if (stalled)
@@ -2122,6 +2131,15 @@ void setFillStall(uint32_t ms) {
   Serial.printf("[fill ] stall cutout = %lu ms%s\n", (unsigned long)ms,
                 ms ? "" : "  (DISABLED)");
 }
+void setHeatCeiling(uint8_t c) {
+  s_heat.ceiling_c = c; s_heat.cut = false;
+  s_prefs.begin("d8link", false); s_prefs.putUChar("hceil", c); s_prefs.end();
+  Serial.printf("[heat ] ceiling = %u C%s\n", (unsigned)c, c ? "" : " (DISABLED)");
+}
+uint8_t  heatCeilingC()  { return s_heat.ceiling_c; }
+bool     heatCeilingCut(){ return s_heat.cut; }
+uint32_t heatCeilingCuts(){ return s_heat.cuts; }
+
 uint32_t fillStallMs()  { return s_fstall.stall_ms; }
 bool     fillStallCut() { return s_fstall.cut; }
 uint32_t fillStallCuts(){ return s_fstall.cuts; }

@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.6.0"
+#define FW_VERSION  "1.7.0"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -198,6 +198,13 @@
 // fill can reach it, and nothing else in this machine will ever stop one.
 // 0 disables. See cn2core::FillStall.
 #define FILL_STALL_MS_DEFAULT   120000UL
+
+// Heater ceiling for PANEL-run cycles. A captured steam phase on this machine
+// reached 99 C, so anything at or below that would break normal operation --
+// this is a runaway backstop, not a setpoint. Byte 1 is uncalibrated and reads
+// LOW, so the real water temperature is higher than the number. 0 disables.
+#define HEAT_CEILING_C          105
+#define HEAT_RELEASE_C          95
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

@@ -131,6 +131,48 @@ struct PanelOvr {
 };
 
 // ---------------------------------------------------------------------------
+// Over-temperature cutout for PANEL-run cycles
+// ---------------------------------------------------------------------------
+// This exists because of a trade, and the trade should be written down.
+//
+// The controller on this machine raises status bit 6 with no cause visible on
+// the wire, and the PANEL is what acts on it: measured, the controller set the
+// bit and the panel dropped every load 0.2 s later. Masking the bit therefore
+// stops the panel aborting -- but it also removes whatever protection that bit
+// represents, and nobody knows what that is.
+//
+// So do not remove a guard without replacing it. If the panel is going to be
+// deaf to the controller's objection, something must still be watching the one
+// hazard a wash can present: heat with no upper bound. This strips the heater
+// bits -- water heat and air heat -- from the forwarded panel frame above a
+// ceiling, and holds them off until the sump has dropped clear of it.
+//
+// The ceiling is above anything this machine has been SEEN to do: its steam
+// phase reached 99 C in a captured cycle, so a limit below that would break
+// normal operation. This is a backstop against runaway, not a regulator.
+struct HeatCeiling {
+  uint8_t ceiling_c = 0;      // 0 disables
+  uint8_t release_c = 0;      // hysteresis: resume below this
+  bool    cut       = false;
+  uint32_t cuts     = 0;
+
+  static const uint8_t HEAT_BITS = 0x04 | 0x08;   // water heat | air heat
+
+  // Returns true on the frame that trips it, so the caller logs once.
+  bool frame(uint8_t b1_want, uint8_t temp_c) {
+    if (!ceiling_c) return false;
+    if (cut) { if (temp_c < release_c) cut = false; return false; }
+    if ((b1_want & HEAT_BITS) && temp_c >= ceiling_c) {
+      cut = true; cuts++; return true;
+    }
+    return false;
+  }
+  uint8_t apply(uint8_t b1) const {
+    return cut ? (uint8_t)(b1 & (uint8_t)~HEAT_BITS) : b1;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Fill-stall cutout for PANEL-run cycles
 // ---------------------------------------------------------------------------
 // Neither end of this link has a fill timeout. Measured on this machine with a
