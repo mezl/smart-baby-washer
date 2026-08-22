@@ -1297,7 +1297,9 @@ async function tick(){
     ? '<span class=mut>full rate</span>'
     : '<span class=warn>&#9679; thinned: panel 1-in-'+s.thin_p+', controller 1-in-'+s.thin_c+'</span>';
   $('lq').innerHTML=[['controller &rarr; ESP',s.ok_c,s.bad_c],
-                     ['panel &rarr; ESP',s.ok_p,s.bad_p]].map(([n,o,b])=>{
+                     ['panel &rarr; ESP',s.ok_p,s.bad_p],
+                     ['ESP &rarr; panel (emitted)',s.tx_bad_p?0:1,s.tx_bad_p],
+                     ['ESP &rarr; controller (emitted)',s.tx_bad_c?0:1,s.tx_bad_c]].map(([n,o,b])=>{
     const t=o+b, pct=t?(100*b/t):0;
     return `${n}: <b>${o}</b> good, `+(b?`<span class=bad>${b} BAD (${pct.toFixed(2)}%)</span>`
                                         :`<span class=ok>0 bad</span>`);
@@ -1410,6 +1412,8 @@ static String statusJson() {
   const int8_t pg = cn2::pcycleGuess();
   j += ",\"pc_prog\":" + (pg >= 0
          ? "\"" + String(cn2::cycleModeName((uint8_t)pg)) + "\"" : String("null"));
+  j += ",\"tx_bad_p\":" + String(cn2::txBadCount(0));
+  j += ",\"tx_bad_c\":" + String(cn2::txBadCount(1));
   j += ",\"e5f_mode\":" + String(cn2::e5FilterMode());
   j += ",\"e5f_on\":" + String(cn2::e5FilterMasking() ? "true" : "false");
   j += ",\"e5f_n\":" + String(cn2::e5FilterFrames());

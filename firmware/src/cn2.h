@@ -106,6 +106,10 @@ uint32_t    pcycleRemainS();     // estimate; 0 when no guess
 uint32_t    pcycleTotalS();      // estimate; 0 when no guess
 uint8_t     pcycleStageN();
 
+// Frames we emitted whose own trailing XOR did not match: a rewrite that
+// forgot to recompute the checksum. Must always be zero. side 0 = to panel.
+uint32_t txBadCount(uint8_t side);
+
 uint32_t worstGapUs();
 // millis() at which that worst gap was recorded. A stall during WiFi
 // association is harmless once the machine's startup handshake is already

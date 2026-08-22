@@ -100,6 +100,7 @@ static int16_t  s_p2_ovr = -1, s_p3_ovr = -1;
 static uint8_t  s_press_mask = 0;
 static uint32_t s_press_until = 0;
 static uint8_t  s_pb_i = 0, s_pb_x = 0;
+static bool     s_pb_edit = false;   // any byte of the in-flight panel frame rewritten
 static uint32_t s_pb_prev = 0;
 static uint8_t  s_panel_b1 = 0, s_panel_b2 = 0, s_panel_b3 = 0;
 // Byte 1 as FORWARDED, i.e. what the controller is actually told to energise.
@@ -188,6 +189,9 @@ static void deltaCheck(uint8_t side, const uint8_t *f, uint8_t n) {
   memcpy(d.b, f, d.n); d.first_ms = millis(); d.count = 1;
 }
 static uint8_t  s_bp_i = 0;             // index within the current board frame
+// True once any byte of the in-flight controller frame has been rewritten, so
+// the trailing checksum is recomputed. See the comment at its use.
+static bool     s_bp_edit = false;
 static uint8_t  s_bp_x = 0;             // XOR of bytes we have actually SENT
 static uint32_t s_bp_prev = 0;   // bytes actually written out: [0]=to board, [1]=to panel
 
@@ -523,10 +527,28 @@ const char *e5FilterWhy()     { return s_e5f_why; }
 // the same side numbering collectOut() uses.
 static cn2core::TxCoalesce s_txq[2];
 
+// Frames we EMIT, checked against their own trailing XOR.
+//
+// Nothing was watching this. A rewrite whose checksum was not recomputed
+// produced frames the far end silently discarded, and the only symptom was the
+// far end reporting a comms fault -- which read as the machine's problem, not
+// ours. ok_c/ok_p only ever counted what we RECEIVE.
+static uint32_t s_txbad[2] = {0, 0};
+
 static void fwFlush(uint8_t side) {
   cn2core::TxCoalesce &q = s_txq[side];
   if (!q.n) return;
   if (q.emit) {
+    if (q.want && q.n == q.want) {
+      uint8_t x = 0;
+      for (uint8_t i = 0; i + 1 < q.n; i++) x ^= q.buf[i];
+      if (x != q.buf[q.n - 1] && s_txbad[side] < 0xFFFFFFFFu) {
+        if (!s_txbad[side])
+          Serial.printf("[tx   ] EMITTING BAD CHECKSUM to %s: %02X != %02X\n",
+                        side == 0 ? "panel" : "board", x, q.buf[q.n - 1]);
+        s_txbad[side]++;
+      }
+    }
     if (side == 0) s_tx[1] += uPanel.write(q.buf, q.n);
     else           s_tx[0] += uBoard.write(q.buf, q.n);
     for (uint8_t i = 0; i < q.n; i++) collectOut(side, q.buf[i]);
@@ -550,7 +572,7 @@ static void pump() {
     uint8_t b = (uint8_t)uBoard.read();
     uint32_t now_us = micros();
     if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) {
-      s_bp_i = 0; s_bp_x = 0;
+      s_bp_i = 0; s_bp_x = 0; s_bp_edit = false;
       fwFlush(0);                    // stale partial goes out before the new frame
     }
     s_bp_prev = now_us;
@@ -600,9 +622,19 @@ static void pump() {
       s_lid_fwd = !cn2core::lidClosed(out);         // what the panel will see
       s_st_real = b; s_st_fwd = out;
     }
-    if ((s_lid_mode || s_st_clr || s_st_set || s_flow_spoof || s_temp_ovr >= 0) &&
-        s_bp_i == 7)
-      out = s_bp_x;
+    // Recompute the checksum whenever ANY byte of this frame was altered.
+    //
+    // This used to enumerate the override flags -- lid, status mask, flow
+    // spoof, temp override -- and the false-E5 filter was added as a fifth
+    // rewrite without being added to the list. The panel then received a frame
+    // carrying the ORIGINAL checksum over EDITED bytes, failed it, and reported
+    // a communication failure: the filter caused the exact fault it exists to
+    // suppress, and only the raw to_panel history showed it.
+    //
+    // A list of "ways a byte might change" goes stale the next time someone
+    // adds a rewrite. Watching whether the byte actually changed cannot.
+    if (out != b) s_bp_edit = true;
+    if (s_bp_edit && s_bp_i == 7) out = s_bp_x;
     else s_bp_x ^= out;
     s_bp_i++;
 
@@ -621,7 +653,7 @@ static void pump() {
 
     uint32_t nu = micros();
     if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) {
-      s_pb_i = 0; s_pb_x = 0;
+      s_pb_i = 0; s_pb_x = 0; s_pb_edit = false;
       fwFlush(1);
     }
     s_pb_prev = nu;
@@ -659,7 +691,11 @@ static void pump() {
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
-    if (po.active() && s_pb_i == 4) out = s_pb_x;
+    // Same rule as the controller direction: observed edit, not a flag list.
+    // po.active() happens to cover every rewrite on this side today, but the
+    // flush cap already subtracts a bit it knows nothing about.
+    if (out != b) s_pb_edit = true;
+    if (s_pb_edit && s_pb_i == 4) out = s_pb_x;
     else s_pb_x ^= out;
     s_pb_i++;
 
@@ -1864,6 +1900,7 @@ bool waitLinkSettled(uint16_t frames, uint32_t timeout_ms) {
   return false;
 }
 uint32_t txCount(uint8_t dest) { return dest < 2 ? s_tx[dest] : 0; }
+uint32_t txBadCount(uint8_t side) { return side < 2 ? s_txbad[side] : 0; }
 
 // Toggled from an esp_timer at twice the requested frequency: one full pulse
 // per two callbacks. Counted on the falling edge, which is what the board's
