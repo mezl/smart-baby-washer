@@ -138,10 +138,10 @@ resets the assembler. Length still decides where a frame *ends*.
 ```
   A2  23  00  02  04  0D  02  88
   |   |   |   |   |   |   |   `- XOR of bytes 0..6
-  |   |   |   |   |   |   `----- 0x02 here, unknown. A later D8 sends 0x03 --
-  |   |   |   |   |   |           the only byte that differs between the two
-  |   |   |   |   |   |           units seen, so treat it as a revision marker
-  |   |   |   |   |   |           rather than a constant
+  |   |   |   |   |   |   `----- 0x02 on the early unit, 0x03 on the later one.
+  |   |   |   |   |   |           Constant within a machine, different between
+  |   |   |   |   |   |           them: a revision marker, not a constant. It is
+  |   |   |   |   |   |           the ONLY byte whose value differs by revision.
   |   |   |   |   |   `--------- unknown, 5..14 — NOT a temperature
   |   |   |   |   `------------- constant 0x04, unknown
   |   |   |   `----------------- STATUS BITFIELD
@@ -231,6 +231,37 @@ removable reservoir, not the sump — and recovers by refilling and pressing
 Start/Pause, unlike the latching hard faults. The board has one unexplained input
 that would suit it: `SW1`, a black 3-pin connector on a machine with a removable
 tank. Unproven, but the only candidate.
+
+## Bit 6 — comms fault on one unit, something else on the other ⚠️
+
+On the early unit bit 6 behaves exactly as the manual's `E5` implies: starve
+the controller of panel frames and it raises the bit within ~8 s, feed it again
+and it clears.
+
+On the **later touch-panel unit** it does that too — *and* asserts
+spontaneously. Observed over a full day:
+
+- raised with **zero bad checksums in either direction**, byte-exact forwarding,
+  and the panel provably receiving (a forged lid state changed its display)
+- held for **hours**, surviving power cycles of every duration
+- unaffected by draining the tub, by cooling, or by firmware version — bisected
+  across five builds, every one clean on a cold boot
+- no precursor: every other byte the controller sends is unchanged across the
+  transition
+- the **panel** is what acts on it — measured at 5 Hz, the controller set the
+  bit and the panel dropped every load 0.2 s later
+
+It also appeared the instant a dry stage ended, then held while the controller
+ran its storage phase autonomously with the panel commanding nothing.
+
+⚠️ **Do not read `E5` as "communication failure" on this unit.** The code table
+is the early unit's (`BW05` manual, p.29) and may not transfer. A link that is
+provably clean while the panel shows a comms error means the label is wrong,
+not the link.
+
+`POST /api/e5filter` can mask the bit so the panel stops aborting. It removes
+whatever protection the bit represents, so the firmware pairs it with a heater
+ceiling — see [api.md](api.md).
 
 ## Bit 0 — flow-related, UNRESOLVED
 

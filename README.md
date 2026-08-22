@@ -22,8 +22,9 @@
   forwarding every frame and rewriting any byte in flight.
 - **Reversible** — `CN2` is a plug-in connector, so the module goes inline on the
   existing cable. Nothing cut, nothing soldered to the OEM board.
-- ⚠️ **Developed and verified on one machine**: Momcozy D8 (`BW05`, board
-  `BBW04001-UL-P`). See [does it fit my machine?](#does-it-fit-my-machine)
+- ⚠️ **Verified on two Momcozy D8 units** — an early button-panel one (board
+  `BBW04001-UL-P`) and a later touch-panel one. Same firmware, unmodified, on
+  both. See [what differs](#what-differs-between-the-two-units)
 
 <p align="center">
   <img src="docs/diagrams/architecture.svg" width="880"
@@ -117,11 +118,13 @@ Reference: [board.md](docs/board.md) · [protocol.md](docs/protocol.md) ·
 
 ## Does it fit my machine?
 
-Only a Momcozy D8 is known to work — one machine, one board.
+Verified on **two** Momcozy D8 units — an early one (board `BBW04001-UL-P`,
+button panel) and a later one (touch panel). Same 9600 8N1 link, same frame
+layout, same load bitmap, and the same firmware ran both unmodified.
 
 | | |
 |---|---|
-| Same board `BBW04001-UL-P` | should work as-is; check the silkscreen first |
+| Momcozy D8, either revision | works; the differences below are cosmetic to the protocol |
 | Another Momcozy, different board | the link will likely decode, but treat every load bit as unknown until you watch it act |
 | Any washer with a separate panel | the approach applies; everything past that is your own work |
 
@@ -131,6 +134,39 @@ Only a Momcozy D8 is known to work — one machine, one board.
   `POST /api/detect` finds the pin map without ever driving a line.
 - A capture from a non-D8 machine is useful — open an issue with `/api/frames`
   output and the board part number.
+
+### What differs between the two units
+
+Measured across 4165 frames from the early unit and 1699 from the later one.
+
+| | early (button panel) | later (touch panel) |
+|---|---|---|
+| controller byte 6 | `0x02` | **`0x03`** — the only byte that differs by revision |
+| controller byte 4 | `0x04` | `0x04` |
+| status bit 6 | seen only when starved of panel frames | also asserted **spontaneously**, held for hours, with a byte-perfect link |
+| lid bits (1 and 7) | reported normally (`0x02`, `0x80`, `0x82`) | **never seen set** in any capture |
+| wash pump on `b0` | low-side switch **does not close** — needs the external relay | **works** — no relay needed |
+| fill targets | `0x07 / 0x1C / 0x20 / 0x23 / 0xFF` | same five values |
+| heater duty | alternates `wash+heat` ↔ `wash-pump-only` | same |
+
+Two of those matter in practice:
+
+⚠️ **`b0` works on the later unit.** The external wash-pump relay in
+[build.md](docs/build.md) is a workaround for the early board's dead low-side
+switch. Check yours before wiring a relay it does not need — command `b0` during
+a wash and listen.
+
+⚠️ **Status bit 6 is not only a comms fault on the later unit.** It was observed
+asserted for hours with zero bad checksums in either direction, surviving power
+cycles, unaffected by draining or by firmware version (bisected across five
+builds). The panel renders it as `E5` and latches it. `POST /api/e5filter` can
+mask it — read the safety note there first, because masking removes whatever
+protection the bit represents.
+
+**Do not assume the error-code table transfers.** Ours comes from the early
+unit's manual (`BW05`, p.29). A later panel may number its codes differently,
+and reading `E5` as "communication failure" on a machine whose link is provably
+clean will send you a long way in the wrong direction.
 
 ## Licence
 
