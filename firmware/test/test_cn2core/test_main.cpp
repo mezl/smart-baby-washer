@@ -576,6 +576,81 @@ static void test_txq_never_overruns_its_buffer(void) {
   TEST_ASSERT_GREATER_THAN(0, flushes);   // ...but a liar of a sender still flushes
 }
 
+
+// ---------------------------------------------------------------------------
+// Panel-cycle program identification
+// ---------------------------------------------------------------------------
+// Reference tables trimmed to what the tests exercise: Normal and Rapid share
+// their entire opening -- drain, fill 0x20, wash, drain, fill 0x1C, rinse --
+// and only separate where Normal has a third fill.
+static const cn2core::RefStage R_NORMAL[] = {
+  {0x02,0,20},{0x20,0x20,0},{0x05,0,600},{0x02,0,20},{0x20,0x1C,0},
+  {0x05,0,480},{0x02,0,20},{0x20,0x1C,0},{0x05,0,480},{0x02,0,20}};
+static const cn2core::RefStage R_RAPID[] = {
+  {0x02,0,20},{0x20,0x20,0},{0x05,0,600},{0x02,0,20},{0x20,0x1C,0},
+  {0x05,0,380},{0x02,0,20}};
+static const cn2core::RefStage R_STEAM[] = {
+  {0x02,0,20},{0x20,0x07,0},{0x04,0,400},{0x22,0xFF,70}};
+
+static void test_pcycle_first_fill_separates_steam(void) {
+  const cn2core::ObsStage obs[] = {{0x02,0},{0x20,0x07}};
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,2,R_STEAM,4) >= 0);
+  TEST_ASSERT_EQUAL_INT(-1, cn2core::matchProgram(obs,2,R_NORMAL,10));
+  TEST_ASSERT_EQUAL_INT(-1, cn2core::matchProgram(obs,2,R_RAPID,7));
+}
+
+static void test_pcycle_normal_and_rapid_stay_ambiguous_early(void) {
+  // Six stages in, both still match -- the tracker must NOT guess yet.
+  const cn2core::ObsStage obs[] =
+    {{0x02,0},{0x20,0x20},{0x05,0},{0x02,0},{0x20,0x1C},{0x05,0}};
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,6,R_NORMAL,10) >= 0);
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,6,R_RAPID,7)  >= 0);
+}
+
+static void test_pcycle_eighth_stage_disambiguates(void) {
+  // Rapid ends at its seventh stage (a drain); an eighth stage that is a FILL
+  // can only be Normal.
+  const cn2core::ObsStage obs[] =
+    {{0x02,0},{0x20,0x20},{0x05,0},{0x02,0},{0x20,0x1C},{0x05,0},
+     {0x02,0},{0x20,0x1C}};
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,8,R_NORMAL,10) >= 0);
+  TEST_ASSERT_EQUAL_INT(-1, cn2core::matchProgram(obs,8,R_RAPID,7));
+}
+
+static void test_pcycle_longer_than_program_rules_it_out(void) {
+  const cn2core::ObsStage obs[] =
+    {{0x02,0},{0x20,0x07},{0x04,0},{0x22,0xFF},{0x02,0}};
+  TEST_ASSERT_EQUAL_INT(-1, cn2core::matchProgram(obs,5,R_STEAM,4));
+}
+
+static void test_pcycle_missing_target_still_matches(void) {
+  // b3 can arrive a beat after the load bit; an observed fill with t3 still 0
+  // must not rule anything out.
+  const cn2core::ObsStage obs[] = {{0x02,0},{0x20,0x00}};
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,2,R_NORMAL,10) >= 0);
+  TEST_ASSERT_TRUE(cn2core::matchProgram(obs,2,R_STEAM,4)  >= 0);
+}
+
+static void test_pcycle_totals_reproduce_the_manual(void) {
+  // The estimate must land on the manual's stated durations, or the countdown
+  // is fiction: Normal 29 min, Rapid 19 min.
+  const uint32_t tn = cn2core::totalEstSecs(R_NORMAL,10);
+  const uint32_t tr = cn2core::totalEstSecs(R_RAPID,7);
+  TEST_ASSERT_UINT32_WITHIN(90, 29*60, tn);
+  TEST_ASSERT_UINT32_WITHIN(90, 19*60, tr);
+}
+
+static void test_pcycle_remaining_counts_down(void) {
+  // Mid-wash (stage 3 of Normal, 100 s in): remaining = 500 left of the wash
+  // + everything after it.
+  uint32_t after = 0;
+  for (int i = 3; i < 10; i++) after += cn2core::stageEstSecs(R_NORMAL[i]);
+  TEST_ASSERT_EQUAL_UINT32(500 + after,
+                           cn2core::remainEstSecs(R_NORMAL,10,3,100));
+  // Overrun of the current stage clamps to the tail, never wraps.
+  TEST_ASSERT_EQUAL_UINT32(after, cn2core::remainEstSecs(R_NORMAL,10,3,9999));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -646,6 +721,14 @@ int main(int, char **) {
   RUN_TEST(test_txq_suppression_drops_the_whole_frame);
   RUN_TEST(test_txq_clear_rearms);
   RUN_TEST(test_txq_never_overruns_its_buffer);
+
+  RUN_TEST(test_pcycle_first_fill_separates_steam);
+  RUN_TEST(test_pcycle_normal_and_rapid_stay_ambiguous_early);
+  RUN_TEST(test_pcycle_eighth_stage_disambiguates);
+  RUN_TEST(test_pcycle_longer_than_program_rules_it_out);
+  RUN_TEST(test_pcycle_missing_target_still_matches);
+  RUN_TEST(test_pcycle_totals_reproduce_the_manual);
+  RUN_TEST(test_pcycle_remaining_counts_down);
 
   RUN_TEST(test_end_to_end_forced_intake_motor);
   RUN_TEST(test_thinned_stream_emits_whole_frames);

@@ -1433,6 +1433,97 @@ void cycleSetSecs(uint8_t i, uint32_t v) {
 }
 
 // Called once per second from relayTask.
+// ---- panel-cycle tracker ---------------------------------------------------
+// Fed at 1 Hz from relayTask. Reads s_panel_b1/s_panel_b3 -- the REAL panel's
+// bytes -- so a cycle the ESP32 runs (panel idle throughout) never registers,
+// and neither do overrides, which only edit the forwarded copy.
+static bool      s_pc_active = false;
+static uint32_t  s_pc_start = 0, s_pc_stage_at = 0, s_pc_idle_at = 0;
+static cn2core::ObsStage s_pc_obs[24];
+static uint8_t   s_pc_n = 0;
+static int8_t    s_pc_guess = -1;
+static uint8_t   s_pc_prev = 0, s_pc_run = 0;
+// A cycle has short all-idle beats between stages; only a long one ends it.
+static const uint32_t PC_END_MS = 150000UL;
+
+static void pcycleGuessUpdate() {
+  int best = -1, hits = 0;
+  for (uint8_t p = 0; p < 6; p++) {
+    // The replica tables ARE the reference: same loads, same targets, and
+    // their per-stage durations reproduce the manual's totals.
+    cn2core::RefStage ref[16];
+    const Prog &P = s_progs[p];
+    for (uint8_t i = 0; i < P.n && i < 16; i++)
+      ref[i] = { P.st[i].loads, P.st[i].t3, P.st[i].secs };
+    if (cn2core::matchProgram(s_pc_obs, s_pc_n, ref, P.n) >= 0) { best = p; hits++; }
+  }
+  s_pc_guess = (hits == 1) ? (int8_t)best : -1;   // ambiguous is not a guess
+}
+
+static void pcycleTick() {
+  // Debounce: two consecutive 1 Hz samples must agree before anything counts.
+  const uint8_t b1 = s_panel_b1;
+  if (b1 != s_pc_prev) { s_pc_prev = b1; s_pc_run = 0; return; }
+  if (s_pc_run < 2 && ++s_pc_run < 2) return;
+
+  const uint32_t now = millis();
+  if (b1 == 0) {
+    if (s_pc_active) {
+      if (!s_pc_idle_at) s_pc_idle_at = now;
+      else if ((uint32_t)(now - s_pc_idle_at) > PC_END_MS) {
+        Serial.printf("[pcyc ] panel cycle ended after %lu s, %u stages\n",
+                      (unsigned long)((now - s_pc_start) / 1000), s_pc_n);
+        s_pc_active = false; s_pc_n = 0; s_pc_guess = -1;
+      }
+    }
+    return;
+  }
+  s_pc_idle_at = 0;
+  if (!s_pc_active) {
+    s_pc_active = true; s_pc_start = now; s_pc_n = 0; s_pc_guess = -1;
+    Serial.println("[pcyc ] panel cycle started");
+  }
+  const uint8_t t3 = (b1 == 0x20 || b1 == 0x22) ? s_panel_b3 : 0;
+  if (s_pc_n == 0 || s_pc_obs[s_pc_n - 1].loads != b1) {
+    if (s_pc_n < 24) { s_pc_obs[s_pc_n++] = { b1, t3 }; pcycleGuessUpdate(); }
+    s_pc_stage_at = now;
+  } else if (t3 && !s_pc_obs[s_pc_n - 1].t3) {
+    s_pc_obs[s_pc_n - 1].t3 = t3;                 // target arrived a beat late
+    pcycleGuessUpdate();
+  }
+}
+
+bool     pcycleActive()   { return s_pc_active; }
+uint32_t pcycleElapsedS() { return s_pc_active ? (millis() - s_pc_start) / 1000 : 0; }
+uint8_t  pcycleStageN()   { return s_pc_n; }
+int8_t   pcycleGuess()    { return s_pc_active ? s_pc_guess : -1; }
+const char *pcyclePhaseName() {
+  if (!s_pc_active || !s_pc_n) return "";
+  if (s_pc_guess >= 0 && s_pc_n <= s_progs[s_pc_guess].n)
+    return s_progs[s_pc_guess].st[s_pc_n - 1].name;
+  static char b[24];
+  cn2core::ObsStage &o = s_pc_obs[s_pc_n - 1];
+  stageName(b, sizeof(b), o.loads, o.t3);
+  return b;
+}
+static uint32_t pcRef(cn2core::RefStage *ref) {
+  const Prog &P = s_progs[s_pc_guess];
+  for (uint8_t i = 0; i < P.n && i < 16; i++)
+    ref[i] = { P.st[i].loads, P.st[i].t3, P.st[i].secs };
+  return P.n;
+}
+uint32_t pcycleRemainS() {
+  if (!s_pc_active || s_pc_guess < 0) return 0;
+  cn2core::RefStage ref[16]; const uint8_t rn = pcRef(ref);
+  return cn2core::remainEstSecs(ref, rn, s_pc_n,
+                                (millis() - s_pc_stage_at) / 1000);
+}
+uint32_t pcycleTotalS() {
+  if (!s_pc_active || s_pc_guess < 0) return 0;
+  cn2core::RefStage ref[16];
+  return cn2core::totalEstSecs(ref, pcRef(ref));
+}
+
 static void cycleTick() {
   if (s_cyc_state != ST_RUN && s_cyc_state != ST_PAUSE) return;
   uint8_t f[24];
@@ -1538,6 +1629,7 @@ static void relayTask(void *) {
       s_g_last_ms = millis();
       sampleTrends();
       cycleTick();
+      pcycleTick();
     }
     vTaskDelay(1);        // 1 ms: shorter than one 9600-baud character
   }

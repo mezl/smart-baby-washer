@@ -148,8 +148,11 @@ function draw(a){
   if(!a) return;
   LAST=a; STATE=a.state;
   const S=['IDLE','RUNNING','COMPLETE','STOPPED','PAUSED'][a.state]||'IDLE';
-  $('st').textContent = a.e5 ? 'ERROR' : S;
-  $('st').className='state'+(a.state===1?' ok':(a.state===3||a.e5?' hot':''));
+  // A cycle running at the machine's own panel. The ESP32 identifies the
+  // program from its stage sequence; until then it is just "running".
+  const pcOn = a.pc && a.state!==1 && a.state!==4;
+  $('st').textContent = a.e5 ? 'ERROR' : (pcOn ? 'RUNNING' : S);
+  $('st').className='state'+((a.state===1||pcOn)?' ok':(a.state===3||a.e5?' hot':''));
 
   if(MODE!==a.mode || !$('modes').children.length){
     MODE=a.mode;
@@ -162,12 +165,19 @@ function draw(a){
   }
 
   const cur=a.stages[a.stage];
+  const mmss=t=>{t=Math.max(0,t|0);const m=(t/60)|0;return m+':'+String(t%60).padStart(2,'0')};
   $('sub').textContent = (a.state===1||a.state===4)
     ? `${a.modes[a.mode].n} — step ${a.stage+1} of ${a.stages.length}: ${cur?cur.name:''}`
+    : pcOn
+    ? ((a.pc_prog?(NICE[a.pc_prog]||[a.pc_prog])[0]:'cycle from the panel')
+       + ' — ' + (a.pc_phase||'') + ' · ' + mmss(a.pc_elapsed) + ' elapsed'
+       + (a.pc_prog ? ' · ~' + mmss(a.pc_remain) + ' left' : ''))
     : (a.state===2?'finished — safe to open':
       (a.state===3?(a.why||'stopped'):'ready'));
   $('pb').style.width = (a.state===1||a.state===4)
-    ? ((a.stage+1)/a.stages.length*100)+'%' : '0';
+    ? ((a.stage+1)/a.stages.length*100)+'%'
+    : (pcOn && a.pc_total>0)
+    ? Math.min(100,100*(a.pc_total-a.pc_remain)/a.pc_total)+'%' : '0';
 
   $('t1').textContent=a.temp+' °C';
   $('lid').innerHTML = a.lid ? '<span class=ok>closed</span>'
@@ -1088,6 +1098,8 @@ async function tick(){
   // is no RUN flag on this link: byte 3 bit 0 was tried and falsified.
   $('state').innerHTML=(re&0x40)?'<span class=bad>E5</span>':(s.pb1)
     ?'<span class=ok>'+phaseName(s.pb1)+'</span>':'<span class=mut>IDLE</span>';
+  const mmss=t=>{t=Math.max(0,t|0);return ((t/60)|0)+':'+String(t%60).padStart(2,'0')};
+
   $('bits').innerHTML=[7,6,5,4,3,2,1,0].map(k=>
     `<div class=bitc><div class=bitn>b${k}</div>`
     +`<div class="bitb ${re>>k&1?'bset':'bclr'}" title="${BITFULL[k]||'unused'}">${re>>k&1}</div>`
@@ -1152,6 +1164,10 @@ async function tick(){
       +' &mdash; these are simulated. Graphs plot them too.</span>'
     : (s.temp_ovr>=0||s.flow_spoof
        ? '<span class=bad>&#9679; overriding what the panel sees</span>'
+       : s.pc
+       ? '<span class=ok>&#9654; panel cycle'+(s.pc_prog?' <b>'+s.pc_prog+'</b>':'')
+         +'</span> &middot; '+mmss(s.pc_elapsed)+' elapsed'
+         +(s.pc_prog?' &middot; ~'+mmss(s.pc_remain)+' left <span class=mut title="Estimated from the reference program tables. The wire carries no countdown; the panel&#39;s own timer is the authority.">(est)</span>':'')
        : '<span class=mut>live from the controller</span>');
   $('pb1').innerHTML=hx(s.pb1)+(s.pb1?' <span class=ok>&#9679;</span>':'');
   $('bprobe').className=s.probe?'on':'';
@@ -1372,6 +1388,12 @@ static String statusJson() {
   j += ",\"wsr_n\":" + String(cn2::wsRelayCloses());
   j += ",\"wsr_lock\":" + String(cn2::wsRelayLocked() ? "true" : "false");
   j += ",\"wsr_pin\":" + String(cn2::wsRelayPin());
+  j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
+  j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());
+  j += ",\"pc_remain\":" + String(cn2::pcycleRemainS());
+  const int8_t pg = cn2::pcycleGuess();
+  j += ",\"pc_prog\":" + (pg >= 0
+         ? "\"" + String(cn2::cycleModeName((uint8_t)pg)) + "\"" : String("null"));
   j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
   j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");
   j += ",\"flush_ms\":" + String(cn2::flushMs());
@@ -1639,6 +1661,21 @@ void begin() {
                ",\"lid\":" + String(cn2core::lidClosed(st) ? "true" : "false") +
                ",\"e5\":" + String((st & 0x40) ? "true" : "false") +
                ",\"why\":\"" + String(cn2::cycleWhy()) + "\"";
+    // A cycle started at the PANEL. The wire carries no countdown -- the panel
+    // keeps its own timer -- so remain/total are estimates from the reference
+    // program tables, and pc_prog is null until the stage sequence identifies
+    // the program uniquely.
+    j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
+    if (cn2::pcycleActive()) {
+      j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());
+      j += ",\"pc_phase\":\"" + String(cn2::pcyclePhaseName()) + "\"";
+      j += ",\"pc_stage\":" + String(cn2::pcycleStageN());
+      const int8_t g = cn2::pcycleGuess();
+      j += ",\"pc_prog\":" + (g >= 0
+             ? "\"" + String(cn2::cycleModeName((uint8_t)g)) + "\"" : String("null"));
+      j += ",\"pc_remain\":" + String(cn2::pcycleRemainS());
+      j += ",\"pc_total\":" + String(cn2::pcycleTotalS());
+    }
     // The fault register, decoded to the code the panel would show. Lowest set
     // bit wins, which is what the panel does.
     const char *err = nullptr, *txt = "";

@@ -187,6 +187,58 @@ struct FlushCap {
 };
 
 // ---------------------------------------------------------------------------
+// Panel-cycle program identification
+// ---------------------------------------------------------------------------
+// When a cycle is started FROM THE PANEL, nothing on the wire carries the
+// remaining time -- the panel keeps its own timer and never transmits it. What
+// the wire does carry is the load bitmap and the fill target of every stage,
+// and the six stock programs differ in exactly those: first fill 0x20 is a
+// wash, 0x07 is steam, 0x23 is self-clean, and Rapid only separates from
+// Normal at the third fill it does not have. So the program can be identified
+// by prefix-matching the observed stages against the known tables, and the
+// countdown ESTIMATED from the reference durations. It is an estimate and the
+// UI must say so -- the panel's own timer is the authority.
+struct ObsStage { uint8_t loads; uint8_t t3; };
+struct RefStage { uint8_t loads; uint8_t t3; uint32_t secs; };  // secs 0 = fill
+
+// A fill runs until its target lands: target counts = t3/0.35 at the measured
+// 2.24 counts/s, plus a little slack for the water to start moving.
+inline uint32_t stageEstSecs(const RefStage &r) {
+  if (r.secs) return r.secs;
+  return (uint32_t)((r.t3 * 20u + 6u) / 7u * 100u / 224u) + 8u;
+}
+
+// How many observed stages match this program's prefix. -1 = ruled out.
+// A fill stage must also match its target; a non-fill stage matches on the
+// load bitmap alone.
+inline int matchProgram(const ObsStage *obs, uint8_t n,
+                        const RefStage *ref, uint8_t rn) {
+  if (n > rn) return -1;
+  for (uint8_t i = 0; i < n; i++) {
+    if (obs[i].loads != ref[i].loads) return -1;
+    if (ref[i].loads == 0x20 && ref[i].t3 && obs[i].t3 &&
+        obs[i].t3 != ref[i].t3) return -1;
+  }
+  return n;
+}
+
+// Seconds left, assuming obs[n-1] is ref[n-1] and has run cur_elapsed_s.
+inline uint32_t remainEstSecs(const RefStage *ref, uint8_t rn, uint8_t n,
+                              uint32_t cur_elapsed_s) {
+  if (n == 0 || n > rn) return 0;
+  const uint32_t cur = stageEstSecs(ref[n - 1]);
+  uint32_t left = (cur_elapsed_s < cur) ? cur - cur_elapsed_s : 0;
+  for (uint8_t i = n; i < rn; i++) left += stageEstSecs(ref[i]);
+  return left;
+}
+
+inline uint32_t totalEstSecs(const RefStage *ref, uint8_t rn) {
+  uint32_t t = 0;
+  for (uint8_t i = 0; i < rn; i++) t += stageEstSecs(ref[i]);
+  return t;
+}
+
+// ---------------------------------------------------------------------------
 // Frame-atomic transmit coalescing
 // ---------------------------------------------------------------------------
 // The relay used to emit each rewritten byte the moment it arrived. That has

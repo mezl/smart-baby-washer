@@ -74,6 +74,18 @@ struct PinProbe {
 };
 bool     pinProbe(int8_t pin, PinProbe &out);
 
+// ---- panel-cycle tracker --------------------------------------------------
+// Watches the REAL panel's byte 1 (never the forwarded copy, so ESP-run cycles
+// and overrides are invisible to it) and identifies which stock program is
+// running from the stage sequence. See cn2core.h for the matching rules.
+bool        pcycleActive();
+uint32_t    pcycleElapsedS();
+const char *pcyclePhaseName();   // current stage, human words
+int8_t      pcycleGuess();       // stock program index, -1 = not identified
+uint32_t    pcycleRemainS();     // estimate; 0 when no guess
+uint32_t    pcycleTotalS();      // estimate; 0 when no guess
+uint8_t     pcycleStageN();
+
 uint32_t worstGapUs();
 // millis() at which that worst gap was recorded. A stall during WiFi
 // association is harmless once the machine's startup handshake is already
