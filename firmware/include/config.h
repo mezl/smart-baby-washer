@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.4.2"
+#define FW_VERSION  "1.4.3"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -183,6 +183,14 @@
 // on one machine: the bit appeared ~47 s after a link interruption, so this is
 // generous on purpose. Nothing is energised while it runs.
 #define PHASE2_PROVOKE_MS       60000UL
+
+// Consecutive frames the false-E5 filter must fail to disprove bit 6 before it
+// stops masking. The controller broadcasts every 200 ms, so 25 frames is ~5 s
+// -- long enough that no transient can latch E5 on the panel, short enough
+// that a genuine sustained fault still reaches the display. Bit 6 LATCHES, so
+// the asymmetry is deliberate: reporting late costs seconds, reporting a false
+// positive costs the owner a power cycle.
+#define E5_FILTER_DOUBT_FRAMES  25
 
 // Unknown until the first scope capture. Changeable at runtime over HTTP and
 // persisted in NVS, because guessing wrong should cost a click, not a reflash.

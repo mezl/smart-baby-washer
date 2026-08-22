@@ -256,6 +256,28 @@ struct E5Filter {
   bool canDisprove() const {
     return transparent && board_fresh && panel_fresh && clean;
   }
+
+  // ---- fail-open was wrong against a LATCHING signal --------------------
+  // The first version passed bit 6 straight through the instant it could not
+  // disprove it. Observed on the machine: 1152 frames masked, then ONE frame
+  // where the check momentarily failed, and that single frame latched E5 on
+  // the panel for good.
+  //
+  // Failing open also does not survive the argument for it. If the ESP->panel
+  // link were really broken the panel would not be receiving our frames AT
+  // ALL, so what we put in byte 3 could not reach it. The only case where
+  // passing bit 6 through actually lands is one where the panel is provably
+  // hearing us -- which is exactly when the claim is false.
+  //
+  // So require the doubt to PERSIST before surrendering the mask. A sustained
+  // real fault still gets reported, a few frames later; a one-frame hiccup no
+  // longer costs the owner a power cycle.
+  uint16_t doubt = 0;
+  bool mask(uint16_t need_consecutive) {
+    if (canDisprove()) { doubt = 0; return true; }
+    if (doubt < 0xFFFF) doubt++;
+    return doubt < need_consecutive;
+  }
 };
 
 // ---------------------------------------------------------------------------

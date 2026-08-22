@@ -819,6 +819,56 @@ static void test_frametx_restarts_cleanly_between_frames(void) {
   TEST_ASSERT_EQUAL_MEMORY(CTRL_FRAME, out, 8);
 }
 
+
+// ---- E5 filter: one bad frame must not latch E5 forever -------------------
+// Observed on the machine: 1152 frames masked, then ONE frame where the health
+// check momentarily failed. That single frame reached the panel, which latched
+// E5 permanently. Against a LATCHING signal, fail-open is the wrong default.
+static void test_e5f_a_single_doubtful_frame_still_masks(void) {
+  cn2core::E5Filter f = healthy();
+  for (int i = 0; i < 50; i++) TEST_ASSERT_TRUE(f.mask(25));
+  f.panel_fresh = false;                 // one hiccup
+  TEST_ASSERT_TRUE_MESSAGE(f.mask(25), "one doubtful frame leaked bit 6");
+  f.panel_fresh = true;
+  TEST_ASSERT_TRUE(f.mask(25));
+  TEST_ASSERT_EQUAL_UINT16(0, f.doubt);  // recovery rearms the budget
+}
+
+static void test_e5f_brief_doubt_never_leaks(void) {
+  // Anything shorter than the threshold, at any point, must hold the mask.
+  for (uint16_t burst = 1; burst < 25; burst++) {
+    cn2core::E5Filter f = healthy();
+    f.mask(25);
+    f.clean = false;
+    bool leaked = false;
+    for (uint16_t i = 0; i < burst; i++) if (!f.mask(25)) leaked = true;
+    TEST_ASSERT_FALSE_MESSAGE(leaked, "a sub-threshold burst leaked bit 6");
+  }
+}
+
+static void test_e5f_sustained_doubt_does_surrender(void) {
+  // A real, lasting fault must still reach the panel -- late, but it must.
+  cn2core::E5Filter f = healthy();
+  f.mask(25);
+  f.transparent = false;
+  for (int i = 0; i < 24; i++) TEST_ASSERT_TRUE(f.mask(25));
+  TEST_ASSERT_FALSE(f.mask(25));         // the 25th consecutive gives up
+  TEST_ASSERT_FALSE(f.mask(25));         // and stays given up
+}
+
+static void test_e5f_doubt_counter_resets_on_recovery(void) {
+  // Doubt must not accumulate across unrelated hiccups minutes apart, or a
+  // healthy machine eventually leaks anyway.
+  cn2core::E5Filter f = healthy();
+  for (int round = 0; round < 10; round++) {
+    f.board_fresh = false;
+    for (int i = 0; i < 20; i++) TEST_ASSERT_TRUE(f.mask(25));
+    f.board_fresh = true;
+    TEST_ASSERT_TRUE(f.mask(25));
+    TEST_ASSERT_EQUAL_UINT16(0, f.doubt);
+  }
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -902,6 +952,10 @@ int main(int, char **) {
   RUN_TEST(test_e5f_will_not_mask_a_fault_it_earned);
   RUN_TEST(test_e5f_will_not_mask_on_a_stale_link);
   RUN_TEST(test_e5f_will_not_mask_with_bad_checksums);
+  RUN_TEST(test_e5f_a_single_doubtful_frame_still_masks);
+  RUN_TEST(test_e5f_brief_doubt_never_leaks);
+  RUN_TEST(test_e5f_sustained_doubt_does_surrender);
+  RUN_TEST(test_e5f_doubt_counter_resets_on_recovery);
 
   RUN_TEST(test_frametx_source_frames_are_themselves_valid);
   RUN_TEST(test_frametx_passthrough_is_byte_identical);

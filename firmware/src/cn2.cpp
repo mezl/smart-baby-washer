@@ -524,21 +524,33 @@ static bool     s_e5f_on    = false;      // masking at this instant
 static uint32_t s_e5f_n     = 0;
 static const char *s_e5f_why = "idle";
 
+static cn2core::E5Filter s_e5f;
+static uint32_t s_e5f_leaks = 0;    // frames where bit 6 reached the panel
+
 static bool e5FilterActive() {
   if (s_e5f_mode == E5F_OFF)   { s_e5f_why = "off";   return s_e5f_on = false; }
   if (s_e5f_mode == E5F_FORCE) { s_e5f_why = "forced"; return s_e5f_on = true; }
-  cn2core::E5Filter f;
+  cn2core::E5Filter &f = s_e5f;
   f.transparent = s_thin_panel.every == 1 && s_thin_ctrl.every == 1 &&
                   !s_probe && !s_spoof && !s_virt;
   f.board_fresh = lastByteAgeMs(FROM_BOARD) < 1000;
   f.panel_fresh = lastByteAgeMs(FROM_PANEL) < 1000;
   f.clean       = (s_bad[0] == 0 && s_bad[1] == 0);
-  s_e5f_on = f.canDisprove();
-  s_e5f_why = s_e5f_on ? "link verified healthy"
-            : !f.transparent ? "not a transparent relay — bit 6 is earned"
-            : !f.board_fresh ? "controller frames stale"
-            : !f.panel_fresh ? "panel frames stale"
-                             : "bad checksums seen — cannot disprove";
+  s_e5f_on = f.mask(E5_FILTER_DOUBT_FRAMES);
+  const char *doubtwhy =
+        !f.transparent ? "not a transparent relay — bit 6 is earned"
+      : !f.board_fresh ? "controller frames stale"
+      : !f.panel_fresh ? "panel frames stale"
+                       : "bad checksums seen — cannot disprove";
+  s_e5f_why = f.doubt == 0 ? "link verified healthy"
+            : s_e5f_on     ? doubtwhy      // doubting, still holding the mask
+                           : doubtwhy;     // gave up: bit 6 now reaches the panel
+  if (!s_e5f_on && s_e5f_leaks < 0xFFFFFFFFu) {
+    if (!s_e5f_leaks)
+      Serial.printf("[e5f  ] releasing the mask after %u doubtful frames: %s\n",
+                    f.doubt, doubtwhy);
+    s_e5f_leaks++;
+  }
   return s_e5f_on;
 }
 
@@ -554,6 +566,8 @@ void setE5Filter(uint8_t m) {
 uint8_t     e5FilterMode()    { return s_e5f_mode; }
 bool        e5FilterMasking() { return s_e5f_on; }
 uint32_t    e5FilterFrames()  { return s_e5f_n; }
+uint32_t    e5FilterLeaks()   { return s_e5f_leaks; }
+uint16_t    e5FilterDoubt()   { return s_e5f.doubt; }
 const char *e5FilterWhy()     { return s_e5f_why; }
 
 // One per direction: [0] toward the panel, [1] toward the controller --

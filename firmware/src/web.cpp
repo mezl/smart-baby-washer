@@ -1418,6 +1418,8 @@ static String statusJson() {
   j += ",\"e5f_mode\":" + String(cn2::e5FilterMode());
   j += ",\"e5f_on\":" + String(cn2::e5FilterMasking() ? "true" : "false");
   j += ",\"e5f_n\":" + String(cn2::e5FilterFrames());
+  j += ",\"e5f_leaks\":" + String(cn2::e5FilterLeaks());
+  j += ",\"e5f_doubt\":" + String(cn2::e5FilterDoubt());
   j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
   j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
   j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");

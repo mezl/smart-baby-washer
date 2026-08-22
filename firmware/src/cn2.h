@@ -96,6 +96,8 @@ void        setE5Filter(uint8_t mode);
 uint8_t     e5FilterMode();
 bool        e5FilterMasking();     // true = masking bit 6 right now
 uint32_t    e5FilterFrames();      // frames masked since boot
+uint32_t    e5FilterLeaks();       // frames where bit 6 REACHED the panel
+uint16_t    e5FilterDoubt();       // consecutive frames it could not disprove
 const char *e5FilterWhy();
 
 bool        pcycleActive();
