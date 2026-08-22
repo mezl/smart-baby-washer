@@ -369,6 +369,14 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
     <div class=lbl style="margin-top:6px">byte3 status bits</div>
     <div class=bits id=bits></div>
     <div class=lbl style="margin-top:5px" id=stshow></div>
+    <div style="margin-top:6px">
+      <b style="color:#9cf;font-size:11px;letter-spacing:.06em">FALSE-E5 FILTER</b>
+      <span id=e5fst class=lbl></span></div>
+    <div class=lbl style="margin-top:1px" title="This controller raises bit 6 two seconds after every power-on while still warm, and again the instant a dry stage ends -- both on a byte-exact link with no missed frames. AUTO does not hide it; it refuses to relay a claim about OUR link that we can positively disprove, and passes it straight through the moment we cannot (thinning, probe, spoof, virtual, stale frames, or any bad checksum).">disproves it, not hides it &mdash; hover</div>
+    <div style="margin-top:3px">
+      <button class=sm id=e5f1 onclick="e5f('auto')">auto</button>
+      <button class=sm id=e5f0 onclick="e5f('off')">off</button>
+      <button class=sm id=e5f2 onclick="e5f('force')">force</button></div>
 </div>
 
   <div class=box><b>ERROR CODES &mdash; BW05 manual, p.29</b>
@@ -976,6 +984,7 @@ function cycUpd(c){
     if(inp && document.activeElement!==inp && +inp.value!==s.secs) inp.value=s.secs;
   });
 }
+function e5f(m){post('/api/e5filter?mode='+m)}
 function fcap(ms){post('/api/flushcap?ms='+(ms|0))}
 function povr(c,v){post('/api/panel_ovr?clr='+c+'&set='+v)}
 function modeo(a,b){post('/api/mode_ovr?b2='+a+'&b3='+b)}
@@ -1130,6 +1139,13 @@ async function tick(){
       +'have no bit. Every fault bit LATCHES: one frame holds until a power cycle, '
       +'and the panel shows the lowest set bit.">E0/E3/E4/E5/E7 confirmed &middot; '
       +'all latch &middot; hover</span>';
+  for(var ei=0;ei<3;ei++){var eb=$('e5f'+ei); if(eb) eb.className='sm'+(s.e5f_mode==ei?' on':'');}
+  $('e5fst').innerHTML = s.e5f_mode==0
+    ? '<span class=mut>off &mdash; bit 6 relayed as sent</span>'
+    : s.e5f_on
+    ? '<span class=ok>&#9679; masking</span> <span class=mut>'+s.e5f_why
+      +(s.e5f_n?' &middot; '+s.e5f_n+' frames':'')+'</span>'
+    : '<span class=warn>&#9679; passing through</span> <span class=mut>'+s.e5f_why+'</span>';
   $('stshow').textContent='real '+hx(re)+' -> sent '+hx(st)
     +(s.st_clr||s.st_set?'   (clr '+hx(s.st_clr)+' set '+hx(s.st_set)+')':'');
   const P=v=>v?'<span class=warn>OFF</span>':'<span class=ok>ON</span>';
@@ -1394,6 +1410,10 @@ static String statusJson() {
   const int8_t pg = cn2::pcycleGuess();
   j += ",\"pc_prog\":" + (pg >= 0
          ? "\"" + String(cn2::cycleModeName((uint8_t)pg)) + "\"" : String("null"));
+  j += ",\"e5f_mode\":" + String(cn2::e5FilterMode());
+  j += ",\"e5f_on\":" + String(cn2::e5FilterMasking() ? "true" : "false");
+  j += ",\"e5f_n\":" + String(cn2::e5FilterFrames());
+  j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
   j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
   j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");
   j += ",\"flush_ms\":" + String(cn2::flushMs());
@@ -1585,6 +1605,25 @@ void begin() {
     if (s_server.hasArg("ms")) cn2::setWifiDelayMs(s_server.arg("ms").toInt());
     s_server.send(200, "application/json",
                   "{\"ok\":true,\"ms\":" + String(cn2::wifiDelayMs()) + "}");
+  });
+
+  //   POST /api/e5filter?mode=off|auto|force
+  //
+  // The controller on the newer board raises bit 6 two seconds after every
+  // power-on while still warm, and again the instant a dry stage ends -- both
+  // on a byte-exact link. AUTO refuses to relay that claim while it can be
+  // disproved, and passes it straight through when it cannot.
+  s_server.on("/api/e5filter", HTTP_POST, []() {
+    if (s_server.hasArg("mode")) {
+      String m = s_server.arg("mode");
+      cn2::setE5Filter(m == "off" ? cn2::E5F_OFF
+                     : m == "force" ? cn2::E5F_FORCE : cn2::E5F_AUTO);
+    }
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"mode\":" + String(cn2::e5FilterMode()) +
+      ",\"masking\":" + String(cn2::e5FilterMasking() ? "true" : "false") +
+      ",\"frames\":" + String(cn2::e5FilterFrames()) +
+      ",\"why\":\"" + String(cn2::e5FilterWhy()) + "\"}");
   });
 
   //   POST /api/pinprobe?pin=3    — transmit stubs only

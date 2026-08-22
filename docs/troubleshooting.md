@@ -329,6 +329,42 @@ bytes still pass through immediately, so the relay stays transparent to noise.
 ends' tolerance — expect a latched `E5` after any flash, and power-cycle the
 machine to clear it. That is the update, not a fault.
 
+### The false-`E5` filter
+
+On the newer board (controller byte 6 = `0x03`), status bit 6 is **not only a
+comms fault**. Observed on a byte-exact link, frame counters never missing a
+beat:
+
+- raised **2 s after every power-on** while the sump is still warm — before
+  WiFi even associates, and with the controller's very first frame clean
+- raised again **the instant a dry stage ends**, in the same 200 ms window the
+  panel goes idle, then held while the machine runs its 72 h storage
+  autonomously (the panel commands nothing all night)
+
+The panel has one meaning for that bit, latches it, and needs a power cycle to
+clear — so a healthy machine sat showing `E5` permanently.
+
+`POST /api/e5filter?mode=off|auto|force` (default **auto**, NVS-persisted).
+AUTO does not hide the bit, it **disproves** it: we are the link being
+complained about, so the claim is refused only while all four hold —
+
+| | |
+|---|---|
+| transparent relay | full rate, no probe / spoof / virtual — each of those is *us* breaking the link, and a fault raised then is earned |
+| controller frames fresh | < 1 s |
+| panel frames fresh | < 1 s |
+| zero bad checksums | corruption is real evidence *for* the fault |
+
+Fail any one and bit 6 passes through untouched. `st_set` is applied after the
+filter, so deliberately injecting `E5` for testing still works.
+
+Status carries `e5f_mode`, `e5f_on`, `e5f_n`, `e5f_why`; the dev page's
+CONTROLLER → PANEL card shows the live verdict.
+
+⚠️ It cannot clear a latch already on the display — **power-cycle once after
+enabling.** And if you ever see `E5` return *with the filter on*, that is
+meaningful: it means the filter refused to mask, so read `e5f_why`.
+
 If the link is clean and `st_real` is `0x00` but the panel still shows `E5`,
 power-cycle the machine. If `E5` comes straight back, take the module out of the
 loop — panel plugged directly into the controller — and power on. Clean without

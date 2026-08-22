@@ -187,6 +187,39 @@ struct FlushCap {
 };
 
 // ---------------------------------------------------------------------------
+// False-E5 filter
+// ---------------------------------------------------------------------------
+// This controller raises status bit 6 -- the bit the panel renders as E5,
+// "communication failure" -- 2 s after every power-on while the machine is
+// still warm, and again the instant a dry stage ends, in the SAME 200 ms
+// window the panel goes idle. Neither is a comms failure: the link is
+// byte-exact and the frame counters do not miss a beat across either event.
+// On this board it reads as a state flag, but the panel has only one meaning
+// for it, latches it, and needs a power cycle to clear.
+//
+// So do not hide the bit -- DISPROVE it. We are the link it is complaining
+// about, so when we can show the link is healthy, the claim is false and must
+// not be relayed. It is only maskable when every one of these holds:
+//
+//   * we are a transparent full-rate relay -- not thinning, not probing, not
+//     spoofing, not running a virtual controller. Every one of those is us
+//     deliberately breaking the link, and a fault raised then is EARNED.
+//   * both ends have delivered a checksum-valid frame within fresh_ms
+//   * neither direction has logged a bad checksum since the last reset
+//
+// Fail any of them and the bit passes through untouched, because then we
+// cannot prove it wrong.
+struct E5Filter {
+  bool transparent = false;   // full rate, no probe/spoof/virtual
+  bool board_fresh = false;
+  bool panel_fresh = false;
+  bool clean       = false;   // zero bad checksums both ways
+  bool canDisprove() const {
+    return transparent && board_fresh && panel_fresh && clean;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Panel-cycle program identification
 // ---------------------------------------------------------------------------
 // When a cycle is started FROM THE PANEL, nothing on the wire carries the

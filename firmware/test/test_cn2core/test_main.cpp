@@ -651,6 +651,39 @@ static void test_pcycle_remaining_counts_down(void) {
   TEST_ASSERT_EQUAL_UINT32(after, cn2core::remainEstSecs(R_NORMAL,10,3,9999));
 }
 
+
+// ---------------------------------------------------------------------------
+// False-E5 filter
+// ---------------------------------------------------------------------------
+static cn2core::E5Filter healthy(void) {
+  cn2core::E5Filter f;
+  f.transparent = f.board_fresh = f.panel_fresh = f.clean = true;
+  return f;
+}
+
+static void test_e5f_disproves_only_when_all_four_hold(void) {
+  TEST_ASSERT_TRUE(healthy().canDisprove());
+}
+
+static void test_e5f_will_not_mask_a_fault_it_earned(void) {
+  // Thinning, probe, spoof and virtual are us deliberately breaking the link.
+  // A comms fault raised then is TRUE and must reach the panel.
+  cn2core::E5Filter f = healthy(); f.transparent = false;
+  TEST_ASSERT_FALSE(f.canDisprove());
+}
+
+static void test_e5f_will_not_mask_on_a_stale_link(void) {
+  cn2core::E5Filter a = healthy(); a.board_fresh = false;
+  cn2core::E5Filter b = healthy(); b.panel_fresh = false;
+  TEST_ASSERT_FALSE(a.canDisprove());
+  TEST_ASSERT_FALSE(b.canDisprove());   // stale frames = cannot prove it wrong
+}
+
+static void test_e5f_will_not_mask_with_bad_checksums(void) {
+  cn2core::E5Filter f = healthy(); f.clean = false;
+  TEST_ASSERT_FALSE(f.canDisprove());   // corruption is real evidence FOR it
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -729,6 +762,11 @@ int main(int, char **) {
   RUN_TEST(test_pcycle_missing_target_still_matches);
   RUN_TEST(test_pcycle_totals_reproduce_the_manual);
   RUN_TEST(test_pcycle_remaining_counts_down);
+
+  RUN_TEST(test_e5f_disproves_only_when_all_four_hold);
+  RUN_TEST(test_e5f_will_not_mask_a_fault_it_earned);
+  RUN_TEST(test_e5f_will_not_mask_on_a_stale_link);
+  RUN_TEST(test_e5f_will_not_mask_with_bad_checksums);
 
   RUN_TEST(test_end_to_end_forced_intake_motor);
   RUN_TEST(test_thinned_stream_emits_whole_frames);

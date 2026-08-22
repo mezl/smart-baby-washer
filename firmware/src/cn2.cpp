@@ -118,6 +118,7 @@ static uint8_t  s_panel_b3_fwd = 0;
 // The decision lives in cn2core::FlushCap so it is exercised on the host; this
 // is only the wiring.
 static cn2core::FlushCap s_fcap;
+static uint8_t  s_e5f_mode = E5F_AUTO;   // false-E5 filter; see e5FilterActive()
 static uint32_t s_wifi_delay = 0;   // radio hold at boot; see setWifiDelayMs()
 // PROBE mode: the controller is fed a permanently idle panel frame while the
 // real panel's bytes are still captured. Buttons can then be pressed freely to
@@ -330,6 +331,8 @@ void begin() {
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
   s_fcap.cap_ms = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
   s_wifi_delay  = s_prefs.getULong("wifid", 0);
+  s_e5f_mode    = s_prefs.getUChar("e5f", E5F_AUTO);
+  if (s_e5f_mode > E5F_FORCE) s_e5f_mode = E5F_AUTO;
   s_prefs.end();
   // Before anything else can command it. Until this runs the pin is high-Z and
   // the external pull resistor is the only thing holding the pump off.
@@ -478,6 +481,44 @@ static void virtSim() {
   s_virt_flow = (uint8_t)s_virt_flowf;
 }
 
+// ---- false-E5 filter (see cn2core::E5Filter) -------------------------------
+
+static bool     s_e5f_on    = false;      // masking at this instant
+static uint32_t s_e5f_n     = 0;
+static const char *s_e5f_why = "idle";
+
+static bool e5FilterActive() {
+  if (s_e5f_mode == E5F_OFF)   { s_e5f_why = "off";   return s_e5f_on = false; }
+  if (s_e5f_mode == E5F_FORCE) { s_e5f_why = "forced"; return s_e5f_on = true; }
+  cn2core::E5Filter f;
+  f.transparent = s_thin_panel.every == 1 && s_thin_ctrl.every == 1 &&
+                  !s_probe && !s_spoof && !s_virt;
+  f.board_fresh = lastByteAgeMs(FROM_BOARD) < 1000;
+  f.panel_fresh = lastByteAgeMs(FROM_PANEL) < 1000;
+  f.clean       = (s_bad[0] == 0 && s_bad[1] == 0);
+  s_e5f_on = f.canDisprove();
+  s_e5f_why = s_e5f_on ? "link verified healthy"
+            : !f.transparent ? "not a transparent relay — bit 6 is earned"
+            : !f.board_fresh ? "controller frames stale"
+            : !f.panel_fresh ? "panel frames stale"
+                             : "bad checksums seen — cannot disprove";
+  return s_e5f_on;
+}
+
+void setE5Filter(uint8_t m) {
+  s_e5f_mode = (m > E5F_FORCE) ? E5F_AUTO : m;
+  s_prefs.begin("d8link", false);
+  s_prefs.putUChar("e5f", s_e5f_mode);
+  s_prefs.end();
+  static const char *N[] = {"OFF (relay it)", "AUTO (mask when provably false)",
+                            "FORCE (always mask)"};
+  Serial.printf("[e5f  ] %s\n", N[s_e5f_mode]);
+}
+uint8_t     e5FilterMode()    { return s_e5f_mode; }
+bool        e5FilterMasking() { return s_e5f_on; }
+uint32_t    e5FilterFrames()  { return s_e5f_n; }
+const char *e5FilterWhy()     { return s_e5f_why; }
+
 // One per direction: [0] toward the panel, [1] toward the controller --
 // the same side numbering collectOut() uses.
 static cn2core::TxCoalesce s_txq[2];
@@ -550,6 +591,12 @@ static void pump() {
       s_lid_real = !cn2core::lidClosed(b);          // what the controller says
       cn2core::StatusOvr so{s_lid_mode, s_st_clr, s_st_set};
       out = cn2core::rewriteStatus(b, so);
+      // Applied last, so a deliberate E5 injection still works: st_set puts
+      // the bit back after the filter would have taken it out.
+      if ((out & 0x40) && !(s_st_set & 0x40) && e5FilterActive()) {
+        out = (uint8_t)(out & ~0x40);
+        if (s_e5f_n < 0xFFFFFFFFu) s_e5f_n++;
+      }
       s_lid_fwd = !cn2core::lidClosed(out);         // what the panel will see
       s_st_real = b; s_st_fwd = out;
     }
@@ -1437,11 +1484,41 @@ void cycleSetSecs(uint8_t i, uint32_t v) {
 // Fed at 1 Hz from relayTask. Reads s_panel_b1/s_panel_b3 -- the REAL panel's
 // bytes -- so a cycle the ESP32 runs (panel idle throughout) never registers,
 // and neither do overrides, which only edit the forwarded copy.
+#define PC_LEARN_SLOTS 4
+#define PC_MAX_ST      20
+struct Learned {
+  char     name[16];
+  uint8_t  n = 0;
+  cn2core::RefStage st[PC_MAX_ST];
+};
+static Learned  s_learned[PC_LEARN_SLOTS];
+static bool     s_pc_dirty = false;   // overrides ran during this cycle: do not learn from it
+
+static void learnedSave(uint8_t i) {
+  char k[8]; snprintf(k, sizeof(k), "lp%u", i);
+  s_prefs.begin("d8link", false);
+  if (s_learned[i].n) s_prefs.putBytes(k, &s_learned[i], sizeof(Learned));
+  else                s_prefs.remove(k);
+  s_prefs.end();
+}
+static void learnedLoad() {
+  s_prefs.begin("d8link", true);
+  for (uint8_t i = 0; i < PC_LEARN_SLOTS; i++) {
+    char k[8]; snprintf(k, sizeof(k), "lp%u", i);
+    if (s_prefs.getBytes(k, &s_learned[i], sizeof(Learned)) != sizeof(Learned))
+      s_learned[i] = Learned();
+    s_learned[i].name[15] = 0;
+    if (s_learned[i].n > PC_MAX_ST) s_learned[i] = Learned();
+  }
+  s_prefs.end();
+}
+
 static bool      s_pc_active = false;
 static uint32_t  s_pc_start = 0, s_pc_stage_at = 0, s_pc_idle_at = 0;
 static cn2core::ObsStage s_pc_obs[24];
+static uint32_t  s_pc_at[24];        // stage start, seconds since cycle start
 static uint8_t   s_pc_n = 0;
-static int8_t    s_pc_guess = -1;
+static int8_t    s_pc_guess = -1;   // 0-5 stock, 10+slot learned, -1 none
 static uint8_t   s_pc_prev = 0, s_pc_run = 0;
 // A cycle has short all-idle beats between stages; only a long one ends it.
 static const uint32_t PC_END_MS = 150000UL;
@@ -1457,7 +1534,45 @@ static void pcycleGuessUpdate() {
       ref[i] = { P.st[i].loads, P.st[i].t3, P.st[i].secs };
     if (cn2core::matchProgram(s_pc_obs, s_pc_n, ref, P.n) >= 0) { best = p; hits++; }
   }
+  for (uint8_t i = 0; i < PC_LEARN_SLOTS; i++)
+    if (s_learned[i].n &&
+        cn2core::matchProgram(s_pc_obs, s_pc_n, s_learned[i].st,
+                              s_learned[i].n) >= 0) { best = 10 + i; hits++; }
   s_pc_guess = (hits == 1) ? (int8_t)best : -1;   // ambiguous is not a guess
+}
+
+// Called once, when a cycle ends. end_s is when the last stage actually
+// stopped (the tracker only declares the end PC_END_MS later).
+static void pcycleLearn(uint32_t end_s) {
+  if (s_pc_dirty || s_pc_n < 4 || s_pc_n > PC_MAX_ST) return;
+  // Durations come from the stage-change timestamps of THIS run.
+  cn2core::RefStage run[PC_MAX_ST];
+  for (uint8_t i = 0; i < s_pc_n; i++) {
+    const uint32_t nxt = (i + 1 < s_pc_n) ? s_pc_at[i + 1] : end_s;
+    run[i] = { s_pc_obs[i].loads, s_pc_obs[i].t3,
+               (nxt > s_pc_at[i]) ? nxt - s_pc_at[i] : 1 };
+  }
+  // A full match against an existing profile refreshes its timings; a stock
+  // match needs nothing. Otherwise take a free slot; none free, learn nothing
+  // rather than silently evict.
+  if (s_pc_guess >= 10) {
+    Learned &L = s_learned[s_pc_guess - 10];
+    if (s_pc_n == L.n) { memcpy(L.st, run, sizeof(run[0]) * L.n); learnedSave(s_pc_guess - 10); }
+    return;
+  }
+  if (s_pc_guess >= 0) return;
+  for (uint8_t i = 0; i < PC_LEARN_SLOTS; i++) {
+    if (s_learned[i].n) continue;
+    Learned &L = s_learned[i];
+    snprintf(L.name, sizeof(L.name), "program %c", 'A' + i);
+    L.n = s_pc_n;
+    memcpy(L.st, run, sizeof(run[0]) * L.n);
+    learnedSave(i);
+    Serial.printf("[pcyc ] learned \"%s\": %u stages, %lu s total\n", L.name,
+                  L.n, (unsigned long)cn2core::totalEstSecs(L.st, L.n));
+    return;
+  }
+  Serial.println("[pcyc ] unmatched cycle, but all learn slots are full");
 }
 
 static void pcycleTick() {
@@ -1473,7 +1588,8 @@ static void pcycleTick() {
       else if ((uint32_t)(now - s_pc_idle_at) > PC_END_MS) {
         Serial.printf("[pcyc ] panel cycle ended after %lu s, %u stages\n",
                       (unsigned long)((now - s_pc_start) / 1000), s_pc_n);
-        s_pc_active = false; s_pc_n = 0; s_pc_guess = -1;
+        pcycleLearn((s_pc_idle_at - s_pc_start) / 1000);
+        s_pc_active = false; s_pc_n = 0; s_pc_guess = -1; s_pc_dirty = false;
       }
     }
     return;
@@ -1481,11 +1597,20 @@ static void pcycleTick() {
   s_pc_idle_at = 0;
   if (!s_pc_active) {
     s_pc_active = true; s_pc_start = now; s_pc_n = 0; s_pc_guess = -1;
+    s_pc_dirty = false;
     Serial.println("[pcyc ] panel cycle started");
   }
+  // Overrides rewrite what the CONTROLLER hears, so a cycle they touched is
+  // not a clean specimen of the program -- track it, learn nothing from it.
+  if (s_p1_clr || s_p1_set || s_probe || s_virt || s_p3_ovr >= 0)
+    s_pc_dirty = true;
   const uint8_t t3 = (b1 == 0x20 || b1 == 0x22) ? s_panel_b3 : 0;
   if (s_pc_n == 0 || s_pc_obs[s_pc_n - 1].loads != b1) {
-    if (s_pc_n < 24) { s_pc_obs[s_pc_n++] = { b1, t3 }; pcycleGuessUpdate(); }
+    if (s_pc_n < 24) {
+      s_pc_at[s_pc_n] = (now - s_pc_start) / 1000;
+      s_pc_obs[s_pc_n++] = { b1, t3 };
+      pcycleGuessUpdate();
+    }
     s_pc_stage_at = now;
   } else if (t3 && !s_pc_obs[s_pc_n - 1].t3) {
     s_pc_obs[s_pc_n - 1].t3 = t3;                 // target arrived a beat late

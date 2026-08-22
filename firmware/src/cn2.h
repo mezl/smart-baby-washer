@@ -78,6 +78,26 @@ bool     pinProbe(int8_t pin, PinProbe &out);
 // Watches the REAL panel's byte 1 (never the forwarded copy, so ESP-run cycles
 // and overrides are invisible to it) and identifies which stock program is
 // running from the stage sequence. See cn2core.h for the matching rules.
+// A panel cycle that ends matching NO known program is LEARNED: its stage
+// sequence and measured durations go to NVS (4 slots), and from then on it is
+// identified like a stock program -- with a countdown built from this
+// machine's own timings rather than another model's manual. A later run that
+// matches a learned profile end-to-end refreshes its durations.
+uint8_t     pcycleLearnedCount();
+const char *pcycleLearnedName(uint8_t slot);
+bool        pcycleRename(uint8_t slot, const char *name);
+bool        pcycleForget(uint8_t slot);
+
+// ---- false-E5 filter ------------------------------------------------------
+// 0 = off (relay bit 6 as sent), 1 = auto (mask only while the link is
+// provably healthy -- see cn2core::E5Filter), 2 = force (always mask).
+enum : uint8_t { E5F_OFF = 0, E5F_AUTO = 1, E5F_FORCE = 2 };
+void        setE5Filter(uint8_t mode);
+uint8_t     e5FilterMode();
+bool        e5FilterMasking();     // true = masking bit 6 right now
+uint32_t    e5FilterFrames();      // frames masked since boot
+const char *e5FilterWhy();
+
 bool        pcycleActive();
 uint32_t    pcycleElapsedS();
 const char *pcyclePhaseName();   // current stage, human words
