@@ -137,7 +137,11 @@ def main():
 
     # 5. real upload over the HTTP path
     try:
-        r = post_multipart(f"/update?key={KEY}", "firmware", "fw.bin", blob)
+        # The device refuses an update while the machine is active -- a cycle,
+        # or the storage flag set -- because starving the panel makes it latch
+        # E5. This is a bench check of the OTA path, so say so explicitly
+        # rather than have the refusal look like a broken upload.
+        r = post_multipart(f"/update?key={KEY}&force=1", "firmware", "fw.bin", blob)
         check("http upload accepted", r.status == 200, f"HTTP {r.status}")
     except Exception as e:
         check("http upload accepted", False, str(e))

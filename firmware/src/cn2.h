@@ -110,6 +110,16 @@ uint8_t     pcycleStageN();
 // forgot to recompute the checksum. Must always be zero. side 0 = to panel.
 uint32_t txBadCount(uint8_t side);
 
+// ---- OTA link gap ---------------------------------------------------------
+// How long the panel went without a forwarded frame across the last update,
+// REBOOT INCLUDED. millis() cannot see across a restart; the RTC clock can, so
+// the last forward is stamped from it and the difference is read back on the
+// next boot. Without this the cost of an OTA was pure guesswork -- and it is
+// the thing that makes the panel latch E5 after every flash.
+uint32_t lastOtaGapMs();
+void     markOtaStart();     // stamp, just before the image is written
+void     serviceNow();       // forward anything pending, from another task
+
 uint32_t worstGapUs();
 // millis() at which that worst gap was recorded. A stall during WiFi
 // association is harmless once the machine's startup handshake is already

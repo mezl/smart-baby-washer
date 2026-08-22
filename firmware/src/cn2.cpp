@@ -1,6 +1,9 @@
 #include "cn2.h"
 
 #include <esp_task_wdt.h>
+#include <esp_system.h>
+#include <rom/rtc.h>
+extern "C" uint64_t esp_rtc_get_time_us(void);
 #include <ctype.h>
 #include <cn2core.h>
 
@@ -224,6 +227,7 @@ static const char *s_wsr_why = "boot";
 static void wsrIdlePin(int8_t pin);
 static void wsrService();
 static void wsrDrive(bool on, const char *why);
+static void pump();
 static void wsrPanelFrame();
 static void flushFrame();
 static void closePorts();   // ordered teardown; see the definition
@@ -322,6 +326,26 @@ static void openPorts() {
                 (int)s_pin_rxp, (int)txPanel);
 }
 
+// RTC_NOINIT survives esp_restart(); so does the RTC clock, which is the only
+// timebase that spans a reboot.
+static RTC_NOINIT_ATTR uint64_t s_ota_mark_us;
+static RTC_NOINIT_ATTR uint32_t s_ota_magic;
+static uint32_t s_ota_gap_ms = 0;
+static const uint32_t OTA_MAGIC = 0x0D8A5A11;
+
+uint32_t lastOtaGapMs() { return s_ota_gap_ms; }
+
+void markOtaStart() {
+  s_ota_mark_us = esp_rtc_get_time_us();
+  s_ota_magic   = OTA_MAGIC;
+}
+
+// Forward whatever has arrived, right now, from whichever task is calling.
+// pump() is re-entrant only in the sense that relayTask is the usual caller;
+// during an OTA relayTask is being starved by flash writes, and the point is
+// to hand the UART something to clock out while the cache is off.
+void serviceNow() { if (s_open) pump(); }
+
 void begin() {
   s_prefs.begin("d8link", false);
   s_baud = s_prefs.getULong("baud", DEFAULT_BAUD);
@@ -345,6 +369,15 @@ void begin() {
                 (int)s_wsr_pin, s_wsr_low ? "LOW" : "HIGH", s_wsr_mode);
   Serial.printf("[flush] untargeted-flush cap %lu ms%s\n",
                 (unsigned long)s_fcap.cap_ms, s_fcap.cap_ms ? "" : "  (DISABLED)");
+  // How long the panel was starved across the last update, reboot included.
+  if (s_ota_magic == OTA_MAGIC) {
+    s_ota_magic = 0;
+    const uint64_t now = esp_rtc_get_time_us();
+    s_ota_gap_ms = (now > s_ota_mark_us) ? (uint32_t)((now - s_ota_mark_us) / 1000) : 0;
+    Serial.printf("[ota  ] panel starved %lu ms across the update%s\n",
+                  (unsigned long)s_ota_gap_ms,
+                  s_ota_gap_ms > 1000 ? "  — expect a latched E5" : "");
+  }
   cycleLoad();                 // stage durations survive a reboot
   openPorts();
   if (!s_task) {

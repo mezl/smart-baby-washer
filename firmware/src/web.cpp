@@ -1412,6 +1412,7 @@ static String statusJson() {
   const int8_t pg = cn2::pcycleGuess();
   j += ",\"pc_prog\":" + (pg >= 0
          ? "\"" + String(cn2::cycleModeName((uint8_t)pg)) + "\"" : String("null"));
+  j += ",\"ota_gap_ms\":" + String(cn2::lastOtaGapMs());
   j += ",\"tx_bad_p\":" + String(cn2::txBadCount(0));
   j += ",\"tx_bad_c\":" + String(cn2::txBadCount(1));
   j += ",\"e5f_mode\":" + String(cn2::e5FilterMode());
@@ -2025,15 +2026,40 @@ void begin() {
             Serial.println("[http-ota] REJECTED — bad key");
             return;
           }
+          // An update starves the panel for as long as it takes, and this panel
+          // latches E5 over it -- a fault the owner then has to power-cycle the
+          // appliance to clear. Never do that to a machine that is mid-cycle:
+          // the loads are held by the panel, and the runner's interlocks are
+          // not watching a cycle the panel owns.
+          //
+          // "Idle on the wire" is NOT the test. This controller runs its 72 h
+          // storage autonomously with the panel commanding nothing, so pb1 == 0
+          // proves only that the panel is quiet.
+          if (!s_server.hasArg("force") &&
+              (cn2::panelB1() != 0 || cn2::pcycleActive() ||
+               cn2::cycleState() == 1 || (cn2::statusReal() & 0x40))) {
+            s_uploadAuthOk = false;
+            Serial.println("[http-ota] REFUSED — machine is active "
+                           "(cycle, or storage flagged). Add &force=1 to override.");
+            return;
+          }
           Serial.printf("[http-ota] receiving %s\n", up.filename.c_str());
+          cn2::markOtaStart();
           cn2::quiesce();
           esp_task_wdt_reset();
           if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
         } else if (up.status == UPLOAD_FILE_WRITE) {
           if (!s_uploadAuthOk) return;
           esp_task_wdt_reset();
+          // Hand the UARTs everything pending BEFORE the write. Update.write()
+          // disables the instruction cache, so relayTask cannot run through it
+          // whatever its priority -- but the TX FIFO keeps clocking. 128 bytes
+          // is ~133 ms of 9600-baud transmission, which is the buffer that
+          // carries the far ends across each stall.
+          cn2::serviceNow();
           if (Update.write(up.buf, up.currentSize) != up.currentSize)
             Update.printError(Serial);
+          cn2::serviceNow();
         } else if (up.status == UPLOAD_FILE_END) {
           if (!s_uploadAuthOk) return;
           if (Update.end(true))
