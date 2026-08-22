@@ -269,6 +269,11 @@ every power-on, and up to 20 s with the access point down. Newer D8 controllers
 raise a comms fault over that. 1.1.0 opens the link first; the same measurement
 now reads **0.0 s**. Check with `/api/version`.
 
+Confirmed on the machine that showed the fault: after 1.1.0 and a power cycle,
+209 s with the controller's status byte never leaving `0x00`, 1046 controller and
+1048 panel frames, **zero bad checksums**, boot dead window **0.00 s**. It had
+previously raised the bit ~52 s in and held it.
+
 Measure it yourself — the byte counters are exact:
 
 ```bash

@@ -138,7 +138,10 @@ resets the assembler. Length still decides where a frame *ends*.
 ```
   A2  23  00  02  04  0D  02  88
   |   |   |   |   |   |   |   `- XOR of bytes 0..6
-  |   |   |   |   |   |   `----- constant 0x02, unknown
+  |   |   |   |   |   |   `----- 0x02 here, unknown. A later D8 sends 0x03 --
+  |   |   |   |   |   |           the only byte that differs between the two
+  |   |   |   |   |   |           units seen, so treat it as a revision marker
+  |   |   |   |   |   |           rather than a constant
   |   |   |   |   |   `--------- unknown, 5..14 — NOT a temperature
   |   |   |   |   `------------- constant 0x04, unknown
   |   |   |   `----------------- STATUS BITFIELD
