@@ -210,3 +210,33 @@ module with a separate `JD-VCC`.
 Do not assume it works because the machine looks normal — see
 [troubleshooting.md](troubleshooting.md) for the four-path test, the link-quality
 counters and the margin test.
+
+## Hardening against interference
+
+The machine's own loads have never corrupted the link — ~220k frames across
+7.7 h of captured cycles, zero bad checksums — so these are prevention, sized
+for the two paths that could actually bite: **supply sag** on the CN2 pin 4
+rail, and the **relay + 24 V pump** the wash-pump workaround adds. The wiring
+diagram's bottom panel shows where each part goes.
+
+| Ref | Part | Where | Guards against |
+|---|---|---|---|
+| C1 | 470–1000 µF electrolytic | XIAO `5V`/`GND`, at the pins | brownout when a heavy load starts during a WiFi burst (300 mA peaks on a rail sized for a button panel) |
+| C2 | 100 nF ceramic | beside C1 | HF that the electrolytic is too slow for |
+| FB1 | ferrite bead, 600 Ω @ 100 MHz, low DCR | in the 5 V feed from CN2 | conducted noise from the machine's rail. A bead, **not a resistor** — 10 Ω at 300 mA would drop 3 V |
+| D1 | SMBJ5.0A TVS | across 5 V/GND at cable entry | switch-off transients from the machine's relays and motors |
+| R1 | 220 Ω | in series, D10 → relay `IN` | ringing and transients on the control line |
+| R2 | 10 kΩ | D10 → GND (already specified) | pump energising while the GPIO is high-Z at reset |
+| D2 | 1N4007 | **across the 24 V pump**, cathode to +24 V | coil kickback when the relay contact opens — the biggest transient source the mod adds |
+
+- Relay module: **opto-isolated, JD-VCC jumper removed** — coil current from
+  its own supply, kickback never reaches the ESP32 rail.
+- AC loads (the drain pump, if ever switched externally): RC snubber
+  100 Ω + 100 nF X2 across the contact — a diode cannot work on AC.
+- Layout costs nothing and matters most: relay/pump wiring out of the CN2
+  signal bundle, 5 V+GND twisted as a pair, one star ground at the shifter's
+  GND pad, antenna clear of the mains loom.
+
+**Verify after fitting:** `POST /api/qclear`, run a full cycle, then check
+`bad_c`/`bad_p` stayed 0 and `boot_count` did not move. A brownout shows as
+`boot_count` climbing with `reset_reason` 15.
