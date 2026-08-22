@@ -869,6 +869,91 @@ static void test_e5f_doubt_counter_resets_on_recovery(void) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// FramePos — byte index must survive a CPU stall
+// ---------------------------------------------------------------------------
+// The bug this replaces: frame position was derived from the wall-clock gap
+// between bytes. A 96 ms stall (WiFi association disabling the instruction
+// cache) made the relay drain the UART FIFO late, the gap looked like a frame
+// boundary, the index reset MID-FRAME, and byte 3 was never recognised as
+// byte 3 -- so every position-keyed rewrite silently skipped it and the raw
+// status byte reached the panel. One frame per boot, and the panel latches.
+//
+// Counting bytes cannot be perturbed by scheduling, which is the whole point:
+// there is no timing input to these tests because there is no timing input to
+// the code any more.
+static void test_framepos_walks_a_controller_frame(void) {
+  cn2core::FramePos p;
+  const uint8_t f[8] = {0xA2,0x19,0x00,0x02,0x04,0x0D,0x02,0xB2};
+  for (uint8_t i = 0; i < 8; i++) {
+    TEST_ASSERT_EQUAL_UINT8(i, p.feed(f[i]));
+    p.advance();
+  }
+  TEST_ASSERT_EQUAL_UINT8(0, p.feed(f[0]));   // wrapped, ready for the next
+}
+
+static void test_framepos_finds_byte3_in_every_frame(void) {
+  // Byte 3 is the status byte -- the one the E5 filter must see. Ten frames
+  // back to back, no gaps, no timing: index 3 must land on it every time.
+  cn2core::FramePos p;
+  const uint8_t f[8] = {0xA2,0x19,0x00,0x40,0x04,0x0D,0x02,0xF0};
+  int seen = 0;
+  for (int frame = 0; frame < 10; frame++)
+    for (uint8_t i = 0; i < 8; i++) {
+      if (p.feed(f[i]) == 3) { TEST_ASSERT_EQUAL_HEX8(0x40, f[i]); seen++; }
+      p.advance();
+    }
+  TEST_ASSERT_EQUAL_INT(10, seen);
+}
+
+static void test_framepos_panel_frame_is_five(void) {
+  cn2core::FramePos p;
+  const uint8_t f[5] = {0xAA,0x05,0x00,0x00,0xAF};
+  for (int frame = 0; frame < 3; frame++)
+    for (uint8_t i = 0; i < 5; i++) {
+      TEST_ASSERT_EQUAL_UINT8(i, p.feed(f[i]));
+      p.advance();
+    }
+}
+
+static void test_framepos_reports_unsynced_on_a_non_header(void) {
+  // Garbage must not be counted as a frame, or the next real header lands at
+  // a nonzero index and every rewrite is off by that much.
+  cn2core::FramePos p;
+  for (int i = 0; i < 5; i++) {
+    TEST_ASSERT_EQUAL_UINT8(0xFF, p.feed(0x55));
+    p.advance();
+    TEST_ASSERT_EQUAL_UINT8(0, p.i);          // parked, still scanning
+  }
+  TEST_ASSERT_EQUAL_UINT8(0, p.feed(0xA2));   // locks on at the real header
+}
+
+static void test_framepos_relocks_after_a_truncated_frame(void) {
+  // A frame cut short by a real break: the next header must re-lock cleanly
+  // rather than inherit the leftover index.
+  cn2core::FramePos p;
+  const uint8_t f[8] = {0xA2,0x19,0x00,0x40,0x04,0x0D,0x02,0xF0};
+  for (uint8_t i = 0; i < 4; i++) { p.feed(f[i]); p.advance(); }
+  TEST_ASSERT_TRUE(p.insideFrame());          // a clock gap MAY NOT reset here
+  p.reset();                                  // ...but a real break can
+  int seen = 0;
+  for (uint8_t i = 0; i < 8; i++) { if (p.feed(f[i]) == 3) seen++; p.advance(); }
+  TEST_ASSERT_EQUAL_INT(1, seen);
+}
+
+static void test_framepos_insideframe_guards_the_clock_reset(void) {
+  // insideFrame() is what stops a stall-induced "gap" from resyncing us
+  // mid-frame. It must be false only at a genuine boundary.
+  cn2core::FramePos p;
+  const uint8_t f[8] = {0xA2,0x19,0x00,0x40,0x04,0x0D,0x02,0xF0};
+  TEST_ASSERT_FALSE(p.insideFrame());         // boundary before the header
+  for (uint8_t i = 0; i < 8; i++) {
+    p.feed(f[i]); p.advance();
+    TEST_ASSERT_EQUAL(i < 7, p.insideFrame());
+  }
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -956,6 +1041,13 @@ int main(int, char **) {
   RUN_TEST(test_e5f_brief_doubt_never_leaks);
   RUN_TEST(test_e5f_sustained_doubt_does_surrender);
   RUN_TEST(test_e5f_doubt_counter_resets_on_recovery);
+
+  RUN_TEST(test_framepos_walks_a_controller_frame);
+  RUN_TEST(test_framepos_finds_byte3_in_every_frame);
+  RUN_TEST(test_framepos_panel_frame_is_five);
+  RUN_TEST(test_framepos_reports_unsynced_on_a_non_header);
+  RUN_TEST(test_framepos_relocks_after_a_truncated_frame);
+  RUN_TEST(test_framepos_insideframe_guards_the_clock_reset);
 
   RUN_TEST(test_frametx_source_frames_are_themselves_valid);
   RUN_TEST(test_frametx_passthrough_is_byte_identical);

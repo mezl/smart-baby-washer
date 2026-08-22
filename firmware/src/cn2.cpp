@@ -104,6 +104,7 @@ static uint8_t  s_press_mask = 0;
 static uint32_t s_press_until = 0;
 static uint8_t  s_pb_i = 0, s_pb_x = 0;
 static cn2core::FrameTx s_pb_tx;    // checksum decision, panel->controller
+static cn2core::FramePos s_pb_pos;
 static uint32_t s_pb_prev = 0;
 static uint8_t  s_panel_b1 = 0, s_panel_b2 = 0, s_panel_b3 = 0;
 // Byte 1 as FORWARDED, i.e. what the controller is actually told to energise.
@@ -195,6 +196,7 @@ static uint8_t  s_bp_i = 0;             // index within the current board frame
 // The checksum decision for the controller->panel direction. cn2core owns it
 // so it is exercised on the host; see cn2core::FrameTx.
 static cn2core::FrameTx s_bp_tx;
+static cn2core::FramePos s_bp_pos;   // byte index, counted not timed
 static uint8_t  s_bp_x = 0;             // XOR of bytes we have actually SENT
 static uint32_t s_bp_prev = 0;   // bytes actually written out: [0]=to board, [1]=to panel
 
@@ -618,10 +620,13 @@ static void pump() {
   while (uBoard.available() && budget--) {
     uint8_t b = (uint8_t)uBoard.read();
     uint32_t now_us = micros();
-    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) {
-      s_bp_i = 0; s_bp_x = 0;
-      fwFlush(0);                    // stale partial goes out before the new frame
+    // A clock gap may only resync when nothing is in flight. Mid-frame it is
+    // far more likely to be OUR stall than a real break -- see FramePos.
+    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs() && !s_bp_pos.insideFrame()) {
+      s_bp_pos.reset(); s_bp_x = 0;
+      fwFlush(0);
     }
+    s_bp_i = s_bp_pos.feed(b);       // 0xFF = unsynced: rewrite nothing
     s_bp_prev = now_us;
     // Decide once per frame, at its first byte, so a frame is never half-sent.
     if (s_bp_i == 0) s_thin_panel.atFrameStart();
@@ -680,9 +685,11 @@ static void pump() {
     //
     // A list of "ways a byte might change" goes stale the next time someone
     // adds a rewrite. Watching whether the byte actually changed cannot.
-    if (s_bp_i == 0) s_bp_tx.start(b);
+    // Unsynced (0xFF) parks at index 0, so start() sees a non-header, gets
+    // len 0, and never substitutes a checksum: pure pass-through.
+    if (s_bp_pos.i == 0) s_bp_tx.start(b);
     out = s_bp_tx.feed(b, out);
-    s_bp_i++;
+    s_bp_pos.advance();
 
     // While the virtual controller is running we must NOT also forward the real
     // one, or the panel sees two controllers interleaved and rejects both.
@@ -698,10 +705,11 @@ static void pump() {
     uint8_t b = (uint8_t)uPanel.read();
 
     uint32_t nu = micros();
-    if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) {
-      s_pb_i = 0; s_pb_x = 0;
+    if ((uint32_t)(nu - s_pb_prev) > frameGapUs() && !s_pb_pos.insideFrame()) {
+      s_pb_pos.reset(); s_pb_x = 0;
       fwFlush(1);
     }
+    s_pb_i = s_pb_pos.feed(b);
     s_pb_prev = nu;
     if (s_pb_i == 0) s_thin_ctrl.atFrameStart();
     bool pressing = s_press_mask && (int32_t)(millis() - s_press_until) < 0;
@@ -738,9 +746,9 @@ static void pump() {
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
     // Same single implementation as the controller direction.
-    if (s_pb_i == 0) s_pb_tx.start(b);
+    if (s_pb_pos.i == 0) s_pb_tx.start(b);
     out = s_pb_tx.feed(b, out);
-    s_pb_i++;
+    s_pb_pos.advance();
 
     // While impersonating the panel we must NOT also forward the real one, or
     // the board sees two panels interleaved and rejects both.

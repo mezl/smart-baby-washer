@@ -187,6 +187,49 @@ struct FlushCap {
 };
 
 // ---------------------------------------------------------------------------
+// Where are we in the frame?
+// ---------------------------------------------------------------------------
+// The rewrite path used to answer this from the WALL-CLOCK GAP between bytes:
+// a gap longer than a few milliseconds meant "new frame, index 0". That is
+// only true while the CPU keeps up with the wire.
+//
+// It does not. WiFi association stalls the forwarding task for ~96 ms (a flash
+// write disables the instruction cache and no task priority helps). The bytes
+// are not lost -- they queue in the UART FIFO -- but they are DRAINED LATE, so
+// the gap between the last byte before the stall and the first byte after
+// looks enormous. The index reset then fired MID-FRAME, the real byte 3 was
+// counted as some other byte, every rewrite keyed to position silently skipped
+// it, and the controller's raw status byte went out untouched. On this machine
+// that meant one unmasked bit 6 per boot, always around t=3.6 s -- and one
+// frame is enough, because the panel latches E5.
+//
+// So do not ask the clock. Frames here are self-describing: a known header
+// gives the length, so count bytes. Nothing the scheduler does can move a
+// count. An unrecognised byte at index 0 leaves us parked at 0, scanning for
+// the next header, which is how a genuinely desynced stream re-locks without
+// ever mis-attributing a position.
+struct FramePos {
+  uint8_t i = 0, len = 0;
+
+  // Call with each byte as it is about to be processed; returns its index
+  // within the frame, or 0xFF when we are not synced to a frame at all.
+  uint8_t feed(uint8_t b) {
+    if (i == 0) {
+      len = frameLenFor(b);
+      if (!len) return 0xFF;        // not a header: pass through, keep scanning
+    }
+    return i;
+  }
+  // Call after the byte has been emitted.
+  void advance() {
+    if (!len) return;               // never synced; stay at 0
+    if (++i >= len) { i = 0; len = 0; }
+  }
+  void reset() { i = 0; len = 0; }
+  bool insideFrame() const { return len != 0 && i != 0; }
+};
+
+// ---------------------------------------------------------------------------
 // Frame transmit: the checksum decision, in ONE place
 // ---------------------------------------------------------------------------
 // Emits a frame byte by byte and fixes the trailing XOR if -- and only if --
