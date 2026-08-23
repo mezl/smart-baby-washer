@@ -119,6 +119,45 @@ before wiring one.
   It should not matter (the UART drives push-pull) but it changed, and it is on
   the one path we cannot observe.
 
+## Controlled heat tests, 2026-08-23
+
+Driven directly from the ESP32 with the panel held idle, bounded and monitored,
+mains ready to cut. Every one ran **clean — no lockout**.
+
+| stage | water | heat rate | lockout |
+|---|---|---|---|
+| wash + heat | 20 counts | **+0.2022 °C/s** | no |
+| wash + heat | 80 counts | **+0.0801 °C/s** | no |
+| steam (heater, no circulation) | 20 counts | **+0.3466 °C/s** | no |
+| **dry (air heat + blower)** | empty | **−0.0501 °C/s** | no |
+
+What these kill and what they leave standing:
+
+- **Heat rate does not determine the lockout.** The 80-count run held 0.0801 °C/s
+  and finished clean; cycle 3 locked out at 0.077 °C/s. Same rate, opposite
+  outcome, and this run went straight through 44 °C.
+- **The water heater is sound at every volume tested**, and the sump probe
+  tracks it faithfully. Both of the day's earlier theories — dead element, stuck
+  sensor — are dead.
+- **Steam is the fastest of all** (0.35 vs 0.20 at the same volume). Without
+  circulation the heat concentrates near the probe rather than spreading.
+- ⚠️ **Dry can never satisfy a "heater on → temperature must rise" check.**
+  With the air heater and blower running, the sump reads a steady *decline*.
+  That is physics, not a fault: the blower cools the sump, the air heater warms
+  air, and this machine has **only the sump NTC — there is no air probe**. Four
+  of the six observed lockouts began during dry.
+- Cutting the heater at 72 °C let the sump coast on to **83 °C** — an 11 °C
+  overshoot. The element runs far hotter than the water and sheds heat slowly.
+
+⚠️ **The lockout needs a LONG power-down to clear.** Measured directly: 15 s,
+30 s and 45 s all came back locked; **60 s cleared it**. Quick flicks do not
+work, which is why several earlier "power cycle didn't help" observations were
+misleading.
+
+⚠️ **A masked bit 6 does not unlock the controller.** Masking stops the *panel*
+aborting; the controller still ignores every load command while locked. The
+machine only runs if bit 6 is clear *when the cycle starts*.
+
 ## The test never run
 
 **Unplug the module; connect the panel straight to the controller's `CN2`
