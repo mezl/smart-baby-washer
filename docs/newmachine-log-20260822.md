@@ -63,9 +63,15 @@ understands, not a fix.
 
 ## Differences from the original unit
 
+⚠️ **Both boards are the SAME revision.** Photographed and compared:
+`BBW04001-UL-P`, `QM-V7 20250805`, `CEM-1 KB-5150 JZ-C E330831` on both — only
+the QC stamp differs (2026.1.25 vs 2026.1.1), and the *later* machine's board
+was tested three weeks *earlier*. So none of the differences below are hardware
+differences. What differs is the panel, and whatever program the MCU runs.
+
 | | early (button panel) | later (touch panel) |
 |---|---|---|
-| controller byte 6 | `0x02` | `0x03` — the only byte differing by revision |
+| controller byte 6 | `0x02` | `0x03` — **not** a revision marker; see below |
 | wash pump on `b0` | low-side switch never closes — needs the external relay | **works** |
 | lid bits 1 and 7 | reported normally | **never seen set** in any capture |
 | status bit 6 | only when starved of panel frames | also asserts spontaneously and holds |
