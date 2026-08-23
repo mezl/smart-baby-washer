@@ -158,7 +158,13 @@
 // 180 s is 1.6x the longest flush ever observed (114.6 s) and longer than the
 // cycle runner's own longest (116 s), so it cannot truncate normal operation.
 // Settable at runtime via POST /api/flushcap; 0 disables.
-#define FLUSH_CAP_MS_DEFAULT  180000UL
+// DEFAULT OFF. The cap assumed that stripping the intake would let the
+// controller end the flush the way it always had -- water stops arriving, sump
+// empties, stage completes. That assumption fails on a locked controller: it
+// ends nothing, so the panel sat in one flush for 2131 s while the cap held the
+// intake off, turning a stall into a stall with no water. Only enable it on a
+// machine whose controller is known to honour the release.
+#define FLUSH_CAP_MS_DEFAULT  0UL
 
 // ---------------------------------------------------------------------------
 // Hold WiFi off until the panel link is up and quiet
