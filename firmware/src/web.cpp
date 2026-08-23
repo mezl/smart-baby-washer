@@ -66,7 +66,22 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
  .bad{background:#3a1414;border-color:#7a2020;color:#ffd7d7}
  .ok{color:#3fb950}.mut{color:#7d8794}.hot{color:#e8734a}
  a{color:#7d8794;font-size:12px}
- .m,.go{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+ .m,.go,.lb{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+ /* Load buttons. The engineering page renders these as 30 px chips, which is
+    fine with a mouse and unusable with a thumb. 64 px and three across. */
+ .loads{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+ .lb{min-height:64px;border:1px solid #38424f;border-radius:10px;background:#1e2630;
+     display:flex;flex-direction:column;align-items:center;justify-content:center;
+     font-size:13px;font-weight:600;user-select:none;cursor:pointer;padding:6px 4px;
+     text-align:center;line-height:1.15}
+ .lb small{display:block;color:#7d8794;font-size:10px;font-weight:400;margin-top:3px}
+ /* forced on by us */
+ .lb.on{background:#1d5c39;border-color:#3fb950;color:#eafaf0}
+ /* the machine itself is driving it */
+ .lb.mach{background:#2a3550;border-color:#5878c8;color:#dce6ff}
+ .lb.tap{filter:brightness(1.4)}
+ .warn2{background:#3a2a08;border:1px solid #7a5a10;color:#ffe6ab;border-radius:9px;
+        padding:9px 11px;font-size:12px;margin-top:10px;line-height:1.35}
  /* :hover latches on a touch screen, so the pressed look is driven by a class
     the tap handler adds and removes rather than by the pointer resting there. */
  .m.tap,.go.tap{filter:brightness(1.4)}
@@ -96,6 +111,16 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
   <div class=modes id=modes></div>
   <button class=go id=go>START</button>
   <div class=stg id=stg></div>
+</div>
+
+<div class=card>
+  <h1 style="margin:0 0 2px">LOADS &mdash; DIRECT CONTROL</h1>
+  <div class=sub id=loadsub></div>
+  <div class=loads id=loads></div>
+  <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:10px">RELEASE ALL</button>
+  <div class=warn2>Tap drives that load on the real machine &mdash; no cycle, no
+    water check, no interlock. Blue means the machine is driving it; green means
+    you are. The heater bits will boil a dry sump.</div>
 </div>
 
 <div style="text-align:center;padding:4px 0 14px">
@@ -128,6 +153,33 @@ function go(){
   ARM=0; post('/api/cycle?run=start');
 }
 $('go').onclick=go;
+
+// Direct load control. Two states per bit: forced ON by us, or passed through.
+// A third "force OFF" exists on the engineering page; it is left out here
+// because on a phone the useful action is "make this run", and three states in
+// one tap target invites the wrong one.
+const LOADS=[[0,'Wash pump','b0'],[1,'Drain','b1'],[2,'Water heat','b2'],
+             [3,'Air heat','b3'],[4,'Blower','b4'],[5,'Intake','b5']];
+let LSET=0;
+function lbit(k){
+  LSET ^= (1<<k);
+  post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16));
+}
+$('lrel').onclick=()=>{ LSET=0; post('/api/panel_ovr?clr=0&set=0'); };
+function drawLoads(a){
+  LSET = a.p1_set|0;
+  const fwd = a.pb1_fwd|0, real = a.pb1|0;
+  $('loads').innerHTML = LOADS.map(([k,n,b])=>{
+    const forced = (LSET>>k&1), machine = (real>>k&1), live = (fwd>>k&1);
+    const cls = forced ? 'lb on' : (machine ? 'lb mach' : 'lb');
+    return `<div class="${cls}" onclick="lbit(${k})">${n}`
+         + `<small>${b} &middot; ${live?'RUNNING':'off'}</small></div>`;
+  }).join('');
+  $('loadsub').innerHTML = a.locked
+    ? '<span class=hot>controller locked &mdash; it will ignore these</span>'
+    : (LSET ? '<span class=ok>you are driving '+LOADS.filter(([k])=>LSET>>k&1).length+' load(s)</span>'
+            : 'tap a load to drive it directly');
+}
 
 // The manual's names, so the page reads like the machine rather than like the
 // firmware's internal program list.
@@ -180,6 +232,7 @@ function draw(a){
     : (pcOn && a.pc_total>0)
     ? Math.min(100,100*(a.pc_total-a.pc_remain)/a.pc_total)+'%' : '0';
 
+  drawLoads(a);
   $('t1').textContent=a.temp+' °C';
   $('lid').innerHTML = a.lid ? '<span class=ok>closed</span>'
                              : '<span class=hot>OPEN</span>';
@@ -1801,6 +1854,11 @@ void begin() {
     // keeps its own timer -- so remain/total are estimates from the reference
     // program tables, and pc_prog is null until the stage sequence identifies
     // the program uniquely.
+    j += ",\"pb1\":" + String(cn2::panelB1());
+    j += ",\"pb1_fwd\":" + String(cn2::panelB1Fwd());
+    j += ",\"p1_set\":" + String(cn2::panelSet());
+    j += ",\"p1_clr\":" + String(cn2::panelClr());
+    j += ",\"locked\":" + String((cn2::statusReal() & 0x40) ? "true" : "false");
     j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
     if (cn2::pcycleActive()) {
       j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());
