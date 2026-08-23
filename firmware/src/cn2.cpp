@@ -498,7 +498,7 @@ static inline void collect(uint8_t side, uint8_t b, uint32_t t_us) {
       Serial.printf("[stuck] panel idle, bit 6 set, sump %u C not falling for %lu s"
                     " — cutting mains\n", (unsigned)(fr[1] & 0x7F),
                     (unsigned long)(s_stuck.dwell_ms / 1000));
-      kasa::powerCycle(s_stuck_off_s);
+      kasa::powerOff();
     }
   }
   if (side == 0 && n >= 8) flowEvent(fr[2]);   // byte 2, every change

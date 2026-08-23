@@ -15,10 +15,19 @@ void        setPlug(const char *ip);
 const char *plugIp();
 bool        configured();
 
-// Arms the plug's count_down to re-energise after off_s, then opens the relay.
-// Returns false if the plug did not acknowledge -- in which case nothing was
-// switched, which is the safe direction.
-bool powerCycle(uint16_t off_s);
+// Opens the relay and LEAVES IT OPEN. Returns false if the plug did not
+// acknowledge, in which case nothing was switched -- the safe direction.
+//
+// Not a power cycle, deliberately, and it took a live failure to learn why:
+// setting the relay manually CANCELS any pending count_down rule, so arming
+// "turn back on in N s" and then switching off silently disarms the timer and
+// the appliance stays dead. Arming it while already off does work -- but this
+// board is powered by what it is switching, so by then it no longer exists.
+//
+// Staying off is also the correct behaviour. This fires because a heater is
+// energised that nothing is commanding and the controller has stopped
+// listening. Restoring power unattended just re-enters that state.
+bool powerOff();
 
 bool     reachable();          // probes get_sysinfo
 uint32_t lastResultMs();       // millis() of the last attempt

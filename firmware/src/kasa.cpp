@@ -86,23 +86,11 @@ static bool call(const char *json, uint32_t timeout_ms = 3000) {
 
 bool reachable() { return call("{\"system\":{\"get_sysinfo\":{}}}"); }
 
-bool powerCycle(uint16_t off_s) {
-  if (off_s < 5)   off_s = 5;
-  if (off_s > 600) off_s = 600;
-  char j[192];
-
-  // Clear any stale rule first, or the plug refuses to add a second one.
+bool powerOff() {
+  // Leave no stale countdown behind that could re-energise the machine later.
   call("{\"count_down\":{\"delete_all_rules\":{}}}");
-
-  // ARM THE RETURN BEFORE CUTTING. We are powered by what we are switching.
-  snprintf(j, sizeof(j),
-           "{\"count_down\":{\"add_rule\":{\"enable\":1,\"delay\":%u,"
-           "\"act\":1,\"name\":\"d8 stuck-load recovery\"}}}", (unsigned)off_s);
-  if (!call(j)) {
-    Serial.printf("[kasa ] could NOT arm the return timer (%s) — not cutting power\n", s_err);
-    return false;
-  }
-  Serial.printf("[kasa ] return armed for +%u s; opening the relay now\n", (unsigned)off_s);
+  Serial.println("[kasa ] opening the relay — machine will STAY OFF until "
+                 "someone restores it");
   return call("{\"system\":{\"set_relay_state\":{\"state\":0}}}");
 }
 

@@ -1631,9 +1631,8 @@ void begin() {
           "{\"ok\":false,\"err\":\"loads are commanded — refusing\"}");
         return;
       }
-      extra += ",\"cycled\":" +
-               String(kasa::powerCycle((uint16_t)s_server.arg("cycle").toInt())
-                      ? "true" : "false");
+      extra += ",\"switched_off\":" +
+               String(kasa::powerOff() ? "true" : "false");
     }
     s_server.send(200, "application/json",
       "{\"ok\":true,\"plug\":\"" + String(kasa::plugIp()) + "\"" + extra +
