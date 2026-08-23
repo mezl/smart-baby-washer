@@ -122,6 +122,11 @@ uint32_t lastOtaGapMs();
 void     markOtaStart();     // stamp, just before the image is written
 void     serviceNow();       // forward anything pending, from another task
 
+bool     pure();
+void     setPure(bool on);
+uint32_t editC();
+uint32_t editP();
+void     resetEdits();
 uint32_t worstGapUs();
 // millis() at which that worst gap was recorded. A stall during WiFi
 // association is harmless once the machine's startup handshake is already

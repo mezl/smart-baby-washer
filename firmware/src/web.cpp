@@ -1469,6 +1469,9 @@ static String statusJson() {
   j += ",\"spoof\":" + String(cn2::spoofOn() ? "true" : "false");
   j += ",\"spoof_sent\":" + String(cn2::spoofCount());
   j += ",\"spoof_frame\":\"" + cn2::spoofFrameHex() + "\"";
+  j += ",\"pure\":" + String(cn2::pure() ? "true" : "false");
+  j += ",\"edit_c\":" + String(cn2::editC());
+  j += ",\"edit_p\":" + String(cn2::editP());
   j += ",\"worst_gap_us\":" + String(cn2::worstGapUs());
   j += ",\"worst_gap_at\":" + String(cn2::worstGapAtMs());
   j += ",\"wifi_delay\":" + String(cn2::wifiDelayMs());
@@ -1794,6 +1797,18 @@ void begin() {
   });
 
   //   POST /api/pinprobe?pin=3    — transmit stubs only
+  // Byte-perfect on demand. Turning this on strips every rewrite at the emit
+  // point, so the E5 mask, the heat ceiling and the cycle runner all stop
+  // acting -- it is a diagnostic and a fallback, not an operating mode.
+  s_server.on("/api/pure", HTTP_POST, []() {
+    if (s_server.hasArg("on")) cn2::setPure(s_server.arg("on").toInt() != 0);
+    if (s_server.hasArg("reset")) cn2::resetEdits();
+    String j = "{\"pure\":" + String(cn2::pure() ? "true" : "false");
+    j += ",\"edit_c\":" + String(cn2::editC());
+    j += ",\"edit_p\":" + String(cn2::editP()) + "}";
+    s_server.send(200, "application/json", j);
+  });
+
   s_server.on("/api/pinprobe", HTTP_POST, []() {
     cn2::PinProbe p;
     const bool ok = cn2::pinProbe((int8_t)s_server.arg("pin").toInt(), p);

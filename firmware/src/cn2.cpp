@@ -203,6 +203,21 @@ static uint8_t  s_bp_i = 0;             // index within the current board frame
 // The checksum decision for the controller->panel direction. cn2core owns it
 // so it is exercised on the host; see cn2core::FrameTx.
 static cn2core::FrameTx s_bp_tx;
+
+// PURE mode and the edit counters answer one question: are we a wire?
+//
+// "Byte-perfect" is worth nothing as a claim about the code, because the claim
+// goes stale the next time a rewrite is added -- that is exactly how the stale
+// checksum bug happened. So it is measured instead, at the single point where a
+// byte leaves us: compare what we are about to emit against what we received.
+// That catches every rewrite path, including ones not yet written.
+//
+// s_pure forces the emitted byte back to the received byte at that same point,
+// so it disables all rewriting in both directions regardless of which feature
+// asked for it, now or later.
+static bool     s_pure   = false;
+static uint32_t s_edit_c = 0;   // bytes we changed, controller->panel
+static uint32_t s_edit_p = 0;   // bytes we changed, panel->controller
 static cn2core::FramePos s_bp_pos;   // byte index, counted not timed
 static uint8_t  s_bp_x = 0;             // XOR of bytes we have actually SENT
 static uint32_t s_bp_prev = 0;   // bytes actually written out: [0]=to board, [1]=to panel
@@ -713,14 +728,27 @@ static void pump() {
     // Unsynced (0xFF) parks at index 0, so start() sees a non-header, gets
     // len 0, and never substitutes a checksum: pure pass-through.
     if (s_bp_pos.i == 0) s_bp_tx.start(b);
+    if (s_pure) {
+      out = b;                        // before the checksum: nothing to correct
+      // The "what the panel sees" mirrors are set inside the per-index blocks
+      // above, which run before this point. In pure mode they would otherwise
+      // report the rewrite that was suppressed -- misleading precisely when
+      // someone is checking whether we are a wire.
+      if      (s_bp_i == 1) s_temp_fwd = b;
+      else if (s_bp_i == 2) s_flow_fwd = b;
+      else if (s_bp_i == 3) { s_st_fwd = b; s_lid_fwd = !cn2core::lidClosed(b); }
+    }
     out = s_bp_tx.feed(b, out);
+    if (out != b) s_edit_c++;         // counts the checksum substitution too
     s_bp_pos.advance();
 
     // While the virtual controller is running we must NOT also forward the real
     // one, or the panel sees two controllers interleaved and rejects both.
     // Frame-atomic: the write happens when the frame is COMPLETE -- see
     // cn2core::TxCoalesce for why.
-    if (s_txq[0].feed(out, !s_virt && s_thin_panel.fwd)) fwFlush(0);
+    // Thinning and the virtual controller DROP bytes, which breaks byte-for-byte
+    // forwarding just as surely as rewriting one does. Pure mode overrides both.
+    if (s_txq[0].feed(out, s_pure || (!s_virt && s_thin_panel.fwd))) fwFlush(0);
     if (s_capture) push(FROM_BOARD, b);
   }
   if (budget < 0) s_overflow++;   // could not drain in one pass — see /api/status
@@ -775,12 +803,18 @@ static void pump() {
     if (s_pb_i == 3) s_panel_b3_fwd = out;
     // Same single implementation as the controller direction.
     if (s_pb_pos.i == 0) s_pb_tx.start(b);
+    if (s_pure) {
+      out = b;
+      if      (s_pb_i == 1) s_panel_b1_fwd = b;
+      else if (s_pb_i == 3) s_panel_b3_fwd = b;
+    }
     out = s_pb_tx.feed(b, out);
+    if (out != b) s_edit_p++;
     s_pb_pos.advance();
 
     // While impersonating the panel we must NOT also forward the real one, or
     // the board sees two panels interleaved and rejects both.
-    if (s_txq[1].feed(out, !s_spoof && s_thin_ctrl.fwd)) fwFlush(1);
+    if (s_txq[1].feed(out, s_pure || (!s_spoof && s_thin_ctrl.fwd))) fwFlush(1);
     if (s_capture) push(FROM_PANEL, b);
   }
   if (budget < 0) s_overflow++;
@@ -1961,6 +1995,11 @@ static void closePorts() {
   uPanel.end();
 }
 
+bool     pure()       { return s_pure; }
+void     setPure(bool on) { s_pure = on; }
+uint32_t editC()      { return s_edit_c; }
+uint32_t editP()      { return s_edit_p; }
+void     resetEdits() { s_edit_c = 0; s_edit_p = 0; }
 uint32_t worstGapUs() { return s_late_us; }
 uint32_t worstGapAtMs() { return s_late_at; }
 
