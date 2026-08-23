@@ -1096,6 +1096,178 @@ static void test_heatceiling_ignores_frames_with_no_heater(void) {
   TEST_ASSERT_FALSE(h.cut);
 }
 
+
+// ---------------------------------------------------------------------------
+// DrainExtend — hold the drain past the machine's fixed stage
+// ---------------------------------------------------------------------------
+// Measured on a real install: a 90-count charge needs 160 s to clear a
+// restricted line against a 28 s drain stage.
+static void test_drainextend_triggers_on_the_falling_edge(void) {
+  cn2core::DrainExtend d; d.extra_ms = 132000;
+  TEST_ASSERT_FALSE(d.frame(0x02, 0));           // draining, not yet finished
+  TEST_ASSERT_FALSE(d.frame(0x02, 5000));
+  TEST_ASSERT_TRUE (d.frame(0x00, 28000));       // panel let go -> extend
+  TEST_ASSERT_TRUE(d.active);
+  TEST_ASSERT_EQUAL_UINT32(1, d.runs);
+}
+
+static void test_drainextend_holds_drain_and_blocks_intake(void) {
+  // This is the whole mechanism: the panel's fill ends on flow COUNT, and with
+  // intake stripped the count cannot advance, so the panel waits.
+  cn2core::DrainExtend d; d.extra_ms = 132000;
+  d.frame(0x02, 0); d.frame(0x00, 28000);
+  TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x20));   // fill commanded -> drain only
+  TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x00));
+  TEST_ASSERT_EQUAL_HEX8(0x03, d.apply(0x01));   // wash pump passes through
+}
+
+static void test_drainextend_ends_on_time_and_releases_intake(void) {
+  cn2core::DrainExtend d; d.extra_ms = 10000;
+  d.frame(0x02, 0); d.frame(0x00, 1000);
+  for (uint32_t t = 1000; t < 11000; t += 200) {
+    d.frame(0x20, t);
+    if (d.active) TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x20));
+  }
+  d.frame(0x20, 11200);
+  TEST_ASSERT_FALSE(d.active);
+  TEST_ASSERT_EQUAL_HEX8(0x20, d.apply(0x20));   // intake flows again
+}
+
+static void test_drainextend_never_extends_into_a_heater(void) {
+  // Draining while heating is the one combination this must never create.
+  cn2core::DrainExtend d; d.extra_ms = 132000;
+  d.frame(0x02, 0); d.frame(0x00, 28000);
+  TEST_ASSERT_TRUE(d.active);
+  d.frame(0x05, 29000);                          // wash + water heat
+  TEST_ASSERT_FALSE_MESSAGE(d.active, "extended into a heater stage");
+  TEST_ASSERT_EQUAL_HEX8(0x05, d.apply(0x05));
+}
+
+static void test_drainextend_does_not_start_if_heat_follows_the_drain(void) {
+  cn2core::DrainExtend d; d.extra_ms = 132000;
+  d.frame(0x02, 0);
+  TEST_ASSERT_FALSE(d.frame(0x04, 28000));       // steam straight after a drain
+  TEST_ASSERT_FALSE(d.active);
+}
+
+static void test_drainextend_zero_disables(void) {
+  cn2core::DrainExtend d; d.extra_ms = 0;
+  d.frame(0x02, 0);
+  TEST_ASSERT_FALSE(d.frame(0x00, 28000));
+  TEST_ASSERT_FALSE(d.active);
+  TEST_ASSERT_EQUAL_HEX8(0x20, d.apply(0x20));
+}
+
+static void test_drainextend_rearms_for_every_drain(void) {
+  // A wash has many drains; each one must get its extension.
+  cn2core::DrainExtend d; d.extra_ms = 1000;
+  uint32_t t = 0;
+  for (int i = 0; i < 5; i++) {
+    d.frame(0x02, t); t += 500;
+    d.frame(0x00, t); t += 1200;
+    d.frame(0x20, t); t += 500;
+  }
+  TEST_ASSERT_EQUAL_UINT32(5, d.runs);
+}
+
+static void test_drainextend_survives_millis_rollover(void) {
+  cn2core::DrainExtend d; d.extra_ms = 1000;
+  const uint32_t t0 = 0xFFFFFF00u;
+  d.frame(0x02, t0);
+  d.frame(0x00, (uint32_t)(t0 + 100));
+  TEST_ASSERT_TRUE(d.active);
+  d.frame(0x20, (uint32_t)(t0 + 1200));
+  TEST_ASSERT_FALSE(d.active);
+}
+
+
+// ---------------------------------------------------------------------------
+// Kasa payload encryption
+// ---------------------------------------------------------------------------
+static void test_kasa_roundtrip(void) {
+  const char *j = "{\"system\":{\"set_relay_state\":{\"state\":0}}}";
+  uint8_t enc[128]; char dec[128];
+  uint16_t n = (uint16_t)strlen(j);
+  cn2core::kasaEncrypt(j, enc, n);
+  cn2core::kasaDecrypt(enc, dec, n);
+  dec[n] = 0;
+  TEST_ASSERT_EQUAL_STRING(j, dec);
+}
+static void test_kasa_first_byte_is_seeded_with_ab(void) {
+  uint8_t enc[4];
+  cn2core::kasaEncrypt("{", enc, 1);
+  TEST_ASSERT_EQUAL_HEX8(0xAB ^ '{', enc[0]);
+}
+
+// ---------------------------------------------------------------------------
+// StuckLoad — this one cuts mains, so the guards are the tests
+// ---------------------------------------------------------------------------
+static void test_stuck_never_fires_while_a_load_is_commanded(void) {
+  // THE critical guard. If the panel is commanding anything, a cycle is in
+  // progress and mains must not be touched, whatever else is true.
+  cn2core::StuckLoad w; w.dwell_ms = 1000; w.hot_c = 40;
+  for (uint32_t t = 0; t <= 60000; t += 200)
+    TEST_ASSERT_FALSE_MESSAGE(w.frame(0x18, 0x40, 90, t),
+                              "cut mains while a load was commanded");
+  for (uint32_t t = 0; t <= 60000; t += 200)
+    TEST_ASSERT_FALSE(w.frame(0x01, 0x40, 90, t));   // even just the pump
+}
+
+static void test_stuck_never_fires_without_bit6(void) {
+  cn2core::StuckLoad w; w.dwell_ms = 1000; w.hot_c = 40;
+  for (uint32_t t = 0; t <= 60000; t += 200)
+    TEST_ASSERT_FALSE(w.frame(0x00, 0x00, 90, t));
+}
+
+static void test_stuck_never_fires_on_a_cool_machine(void) {
+  cn2core::StuckLoad w; w.dwell_ms = 1000; w.hot_c = 40;
+  for (uint32_t t = 0; t <= 60000; t += 200)
+    TEST_ASSERT_FALSE(w.frame(0x00, 0x40, 25, t));
+}
+
+static void test_stuck_never_fires_while_cooling(void) {
+  // A machine settling after a cycle is not stuck. Falling temperature must
+  // rearm the clock indefinitely.
+  // Modelled on the real rate measured after a cycle: ~0.6 C/min, i.e. about
+  // 2 C across a 180 s dwell -- which is exactly the margin the peak test has
+  // to resolve, so this is not a soft test.
+  cn2core::StuckLoad w; w.dwell_ms = 300000; w.hot_c = 40;
+  uint8_t temp = 90;
+  for (uint32_t t = 0; t <= 1800000; t += 10000) {
+    TEST_ASSERT_FALSE_MESSAGE(w.frame(0x00, 0x40, temp, t), "cut mains on a cooling machine");
+    if ((t / 10000) % 10 == 9 && temp > 45) temp--;   // 1 C per 100 s
+  }
+}
+
+static void test_stuck_fires_on_a_held_temperature(void) {
+  // The real case: panel idle, bit 6 set, sump flat. 88 minutes of that was
+  // observed on the machine.
+  cn2core::StuckLoad w; w.dwell_ms = 1000; w.hot_c = 40;
+  uint32_t fires = 0;
+  for (uint32_t t = 0; t <= 5000; t += 200)
+    if (w.frame(0x00, 0x40, 55, t)) fires++;
+  TEST_ASSERT_EQUAL_UINT32(1, fires);   // once, not every frame
+  TEST_ASSERT_EQUAL_UINT32(1, w.fires);
+}
+
+static void test_stuck_rearms_if_the_panel_wakes_mid_dwell(void) {
+  cn2core::StuckLoad w; w.dwell_ms = 10000; w.hot_c = 40;
+  for (uint32_t t = 0; t < 5000; t += 200) w.frame(0x00, 0x40, 55, t);
+  TEST_ASSERT_TRUE(w.armed);
+  w.frame(0x18, 0x40, 55, 5200);          // a cycle starts
+  TEST_ASSERT_FALSE(w.armed);
+  // and the dwell restarts from scratch rather than resuming
+  for (uint32_t t = 5400; t < 14000; t += 200)
+    TEST_ASSERT_FALSE(w.frame(0x00, 0x40, 55, t));
+}
+
+static void test_stuck_zero_disables(void) {
+  cn2core::StuckLoad w; w.dwell_ms = 0; w.hot_c = 40;
+  for (uint32_t t = 0; t <= 600000; t += 1000)
+    TEST_ASSERT_FALSE(w.frame(0x00, 0x40, 90, t));
+  TEST_ASSERT_EQUAL_UINT32(0, w.fires);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_frameLenFor_known_headers);
@@ -1146,6 +1318,25 @@ int main(int, char **) {
   RUN_TEST(test_isDriven_threshold);
   RUN_TEST(test_resolveRx_both_orders);
   RUN_TEST(test_resolveRx_refuses_ambiguous_input);
+
+  RUN_TEST(test_kasa_roundtrip);
+  RUN_TEST(test_kasa_first_byte_is_seeded_with_ab);
+  RUN_TEST(test_stuck_never_fires_while_a_load_is_commanded);
+  RUN_TEST(test_stuck_never_fires_without_bit6);
+  RUN_TEST(test_stuck_never_fires_on_a_cool_machine);
+  RUN_TEST(test_stuck_never_fires_while_cooling);
+  RUN_TEST(test_stuck_fires_on_a_held_temperature);
+  RUN_TEST(test_stuck_rearms_if_the_panel_wakes_mid_dwell);
+  RUN_TEST(test_stuck_zero_disables);
+
+  RUN_TEST(test_drainextend_triggers_on_the_falling_edge);
+  RUN_TEST(test_drainextend_holds_drain_and_blocks_intake);
+  RUN_TEST(test_drainextend_ends_on_time_and_releases_intake);
+  RUN_TEST(test_drainextend_never_extends_into_a_heater);
+  RUN_TEST(test_drainextend_does_not_start_if_heat_follows_the_drain);
+  RUN_TEST(test_drainextend_zero_disables);
+  RUN_TEST(test_drainextend_rearms_for_every_drain);
+  RUN_TEST(test_drainextend_survives_millis_rollover);
 
   RUN_TEST(test_heatceiling_allows_the_captured_steam_phase);
   RUN_TEST(test_heatceiling_cuts_only_the_heater_bits);

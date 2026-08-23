@@ -19,6 +19,7 @@
 #include "app.h"
 #include "config.h"
 #include "cn2.h"
+#include "kasa.h"
 #include "net.h"
 #include "web.h"
 
@@ -132,6 +133,7 @@ void setup() {
     Serial.println("[boot ] SAFE MODE — CN2 link disabled, OTA only. "
                    "Power-cycle to clear.");
   } else {
+    kasa::begin();
     cn2::begin();
     Serial.printf("[cn2  ] link open %lu ms after boot\n",
                   (unsigned long)millis());

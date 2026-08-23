@@ -1,6 +1,8 @@
 #include "cn2.h"
 
 #include <esp_task_wdt.h>
+
+#include "kasa.h"
 #include <esp_system.h>
 #include <rom/rtc.h>
 extern "C" uint64_t esp_rtc_get_time_us(void);
@@ -125,6 +127,9 @@ static uint8_t  s_panel_b3_fwd = 0;
 static cn2core::FlushCap s_fcap;
 static cn2core::FillStall s_fstall;   // panel-run fill guard; see cn2core
 static cn2core::HeatCeiling s_heat;   // panel-run heater backstop
+static cn2core::DrainExtend s_dext;   // panel-run drain extension
+static cn2core::StuckLoad   s_stuck;  // mains cut-out; see cn2core::StuckLoad
+static uint16_t s_stuck_off_s = 30;
 static uint8_t  s_e5f_mode = E5F_AUTO;   // false-E5 filter; see e5FilterActive()
 static uint32_t s_wifi_delay = 0;   // radio hold at boot; see setWifiDelayMs()
 // PROBE mode: the controller is fed a permanently idle panel frame while the
@@ -364,6 +369,10 @@ void begin() {
   s_fcap.cap_ms    = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
   s_fstall.stall_ms = s_prefs.getULong("fstall", FILL_STALL_MS_DEFAULT);
   s_heat.ceiling_c  = s_prefs.getUChar("hceil", HEAT_CEILING_C);
+  s_dext.extra_ms   = s_prefs.getULong("dext", DRAIN_EXTRA_MS_DEFAULT);
+  s_stuck.dwell_ms  = s_prefs.getULong("stkms", STUCK_DWELL_MS_DEFAULT);
+  s_stuck.hot_c     = s_prefs.getUChar("stkc", STUCK_HOT_C);
+  s_stuck_off_s     = (uint16_t)s_prefs.getUShort("stkoff", STUCK_OFF_S);
   s_heat.release_c  = HEAT_RELEASE_C;
   s_wifi_delay  = s_prefs.getULong("wifid", 0);
   s_e5f_mode    = s_prefs.getUChar("e5f", E5F_AUTO);
@@ -481,6 +490,17 @@ static inline void collect(uint8_t side, uint8_t b, uint32_t t_us) {
   s_donen[side] = n;
   s_seq[side]++;
   if (side == 1) { wsrPanelFrame(); flushFrame(); }   // whole frames only
+  if (side == 0 && n >= 8) {
+    // Stuck-load watchdog. Reads the CONTROLLER's own bytes and the panel's
+    // real byte 1 -- never the forwarded copies, so masking bit 6 for the
+    // panel does not blind the thing that cuts mains.
+    if (s_stuck.frame(s_panel_b1, fr[3], (uint8_t)(fr[1] & 0x7F), millis())) {
+      Serial.printf("[stuck] panel idle, bit 6 set, sump %u C not falling for %lu s"
+                    " — cutting mains\n", (unsigned)(fr[1] & 0x7F),
+                    (unsigned long)(s_stuck.dwell_ms / 1000));
+      kasa::powerCycle(s_stuck_off_s);
+    }
+  }
   if (side == 0 && n >= 8) flowEvent(fr[2]);   // byte 2, every change
   deltaCheck(side, fr, n);
   histAdd(side, fr, n);
@@ -749,6 +769,7 @@ static void pump() {
       out = s_fcap.apply(out);                  // drop intake, leave drain
       out = s_fstall.apply(out);                // ...and if water never came
       out = s_heat.apply(out);                  // ...and above the heat ceiling
+      out = s_dext.apply(out);                  // hold drain / hold off intake
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
@@ -1759,7 +1780,12 @@ static void cycleTick() {
   }
 
   if (lastByteAgeMs(FROM_BOARD) > LINK_DEAD_MS) { cycAbort("controller went quiet"); return; }
-  if (st & 0x7C)                                { cycAbort("controller fault bit"); return; }
+  // Guard on the byte as FORWARDED, not as received, so this respects exactly
+  // the owner's masking decision and nothing more. With the E5 filter on, bit 6
+  // is ignored here as it is at the panel; E3, E4, E0 and E7 still abort,
+  // because none of those are being suppressed. With the filter off, st_fwd ==
+  // st_real and this is the original behaviour.
+  if (s_st_fwd & 0x7C)                          { cycAbort("controller fault bit"); return; }
   // The lid guard honours an explicit "force LID ON" override; the fault guard
   // above does not honour anything.
   //
@@ -2078,6 +2104,10 @@ static void flushFrame() {
   s_fcap_okprev = s_asm[1].ok;
   if (!valid) return;                     // a bad frame proves nothing
 
+  if (s_dext.frame(s_panel_b1_want, millis()))
+    Serial.printf("[drain] extending by %lu s — intake held off so the panel "
+                  "waits at its fill\n", (unsigned long)(s_dext.extra_ms / 1000));
+
   if (s_heat.frame(s_panel_b1_want, (uint8_t)(s_temp_real & 0x7F)))
     Serial.printf("[heat ] %u C >= ceiling %u — heater bits stripped until %u C\n",
                   (unsigned)(s_temp_real & 0x7F), (unsigned)s_heat.ceiling_c,
@@ -2131,6 +2161,38 @@ void setFillStall(uint32_t ms) {
   Serial.printf("[fill ] stall cutout = %lu ms%s\n", (unsigned long)ms,
                 ms ? "" : "  (DISABLED)");
 }
+void setStuckWatch(uint32_t dwell_ms, uint8_t hot_c, uint16_t off_s) {
+  s_stuck.dwell_ms = dwell_ms;
+  if (hot_c) s_stuck.hot_c = hot_c;
+  if (off_s) s_stuck_off_s = off_s;
+  s_stuck.reset();
+  s_prefs.begin("d8link", false);
+  s_prefs.putULong("stkms", s_stuck.dwell_ms);
+  s_prefs.putUChar("stkc", s_stuck.hot_c);
+  s_prefs.putUShort("stkoff", s_stuck_off_s);
+  s_prefs.end();
+  Serial.printf("[stuck] dwell %lu ms, above %u C, cut for %u s%s\n",
+                (unsigned long)s_stuck.dwell_ms, (unsigned)s_stuck.hot_c,
+                (unsigned)s_stuck_off_s, s_stuck.dwell_ms ? "" : "  (DISABLED)");
+}
+uint32_t stuckDwellMs(){ return s_stuck.dwell_ms; }
+uint8_t  stuckHotC()   { return s_stuck.hot_c; }
+uint16_t stuckOffS()   { return s_stuck_off_s; }
+uint32_t stuckFires()  { return s_stuck.fires; }
+bool     stuckArmed()  { return s_stuck.armed; }
+
+void setDrainExtra(uint32_t ms) {
+  if (ms > 600000UL) ms = 600000UL;
+  s_dext.extra_ms = ms; s_dext.active = false;
+  s_prefs.begin("d8link", false); s_prefs.putULong("dext", ms); s_prefs.end();
+  Serial.printf("[drain] extension = %lu ms%s\n", (unsigned long)ms,
+                ms ? "" : " (DISABLED)");
+}
+uint32_t drainExtraMs()  { return s_dext.extra_ms; }
+bool     drainExtending(){ return s_dext.active; }
+uint32_t drainExtendRemainMs() { return s_dext.remainMs(millis()); }
+uint32_t drainExtendRuns(){ return s_dext.runs; }
+
 void setHeatCeiling(uint8_t c) {
   s_heat.ceiling_c = c; s_heat.cut = false;
   s_prefs.begin("d8link", false); s_prefs.putUChar("hceil", c); s_prefs.end();

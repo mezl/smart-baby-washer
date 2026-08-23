@@ -131,6 +131,138 @@ struct PanelOvr {
 };
 
 // ---------------------------------------------------------------------------
+// Kasa (TP-Link Smart Home) payload encryption
+// ---------------------------------------------------------------------------
+// Autokey XOR seeded with 0xAB: each ciphertext byte becomes the key for the
+// next. Trivial, and the whole reason an ESP32 can drive one of these plugs
+// without a library.
+inline void kasaEncrypt(const char *in, uint8_t *out, uint16_t n) {
+  uint8_t k = 0xAB;
+  for (uint16_t i = 0; i < n; i++) { k ^= (uint8_t)in[i]; out[i] = k; }
+}
+inline void kasaDecrypt(const uint8_t *in, char *out, uint16_t n) {
+  uint8_t k = 0xAB;
+  for (uint16_t i = 0; i < n; i++) { out[i] = (char)(k ^ in[i]); k = in[i]; }
+}
+
+// ---------------------------------------------------------------------------
+// Stuck-load watchdog
+// ---------------------------------------------------------------------------
+// Why this exists, stated plainly because it cuts mains to an appliance:
+//
+// This controller raises status bit 6 when a heater is commanded and the
+// temperature does not respond -- measured six times across four captures, at
+// a dead stall on 44 C during wash+heat and on a flat or falling sump during
+// dry. Once it is set the controller stops acting on load commands, INCLUDING
+// the panel's end-of-cycle release. The panel says finished and drops every
+// bit; the locked controller never processes it, and the blower and air heater
+// keep running. Observed holding 52-55 C for 88 minutes.
+//
+// Nothing on the CN2 link can stop that -- the panel is already commanding
+// nothing. The only remaining lever is mains.
+//
+// The trigger is deliberately narrow. All three must hold, continuously, for
+// the full dwell:
+//   * the panel is commanding NOTHING. If any load bit is set a cycle is in
+//     progress and mains must not be touched, whatever else is true.
+//   * the controller is asserting bit 6.
+//   * the sump is not cooling. A machine that is merely warm and settling is
+//     not stuck, and must not trip this.
+struct StuckLoad {
+  uint32_t dwell_ms = 0;        // 0 disables
+  uint8_t  hot_c    = 40;       // below this, nothing worth cutting power over
+  uint32_t since    = 0;
+  bool     armed    = false;
+  // Latched once fired. Without it the dwell simply restarts and it cuts mains
+  // again every dwell_ms for as long as the fault lasts -- a power-cycle loop
+  // on an appliance. It only rearms when the trigger conditions genuinely clear.
+  bool     latched  = false;
+  uint8_t  ref_temp = 0;      // PEAK seen while armed, not the arming value
+  uint32_t fires    = 0;
+
+  void reset() { armed = false; latched = false; }
+
+  // Call once per checksum-valid controller frame. Returns true exactly once,
+  // on the frame that should cut power.
+  bool frame(uint8_t panel_b1, uint8_t status, uint8_t temp_c, uint32_t now) {
+    const bool idle    = (panel_b1 == 0);
+    const bool locked  = (status & 0x40) != 0;
+    const bool hot     = temp_c >= hot_c;
+    if (!dwell_ms || !idle || !locked || !hot) {
+      armed = false; latched = false; return false;
+    }
+    if (!armed) { armed = true; latched = false; since = now; ref_temp = temp_c; return false; }
+    if (temp_c > ref_temp) ref_temp = temp_c;
+    // Cooling means it is settling on its own -- not stuck. Compare against the
+    // PEAK, so a sensor dithering by a degree does not read as cooling and a
+    // genuine decline does.
+    if (temp_c + 2 <= ref_temp) { armed = false; return false; }
+    if (!latched && (uint32_t)(now - since) >= dwell_ms) {
+      latched = true; fires++; return true;
+    }
+    return false;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Drain extension for PANEL-run cycles
+// ---------------------------------------------------------------------------
+// The drain stage is a FIXED DURATION in the machine's program -- 28 s on this
+// unit, 20 s on the earlier one -- and the machine has no idea whether the tub
+// actually emptied. Plumb it into a restricted line and it does not: measured
+// on this install, a normal 90-count charge takes 160 s to clear against a
+// 28 s stage. Every later stage then starts on top of standing water.
+//
+// The panel cannot be paused; it runs its own clock. But the FILL stage does
+// not end on time, it ends when the flow count reaches target, and the machine
+// has no fill timeout at either end -- it waits indefinitely. That is the lever:
+//
+//   hold DRAIN on, and hold INTAKE off, and the panel simply waits at its fill
+//   stage until we let go. Release, water flows, the count advances, and the
+//   program carries on in step. Nothing has to be faked and no stage is skipped.
+//
+// Aborts immediately if a heater bit appears. Draining while heating is the one
+// combination that must never be extended into, and a program that heats
+// straight after a drain is not one this can safely stretch.
+struct DrainExtend {
+  uint32_t extra_ms = 0;      // 0 disables
+  bool     active   = false;
+  uint32_t since    = 0;
+  bool     prev_drain = false;
+  uint32_t runs     = 0;
+
+  static const uint8_t DRAIN = LOAD_DRAIN;      // 0x02
+  static const uint8_t HEAT  = 0x04 | 0x08;
+
+  // Call once per checksum-valid panel frame with byte 1 BEFORE extension.
+  // Returns true on the frame that starts an extension, for one log line.
+  bool frame(uint8_t b1_want, uint32_t now) {
+    const bool draining = (b1_want & DRAIN) != 0;
+    bool started = false;
+    if (active) {
+      if (b1_want & HEAT)                            active = false;  // never extend into heat
+      else if ((uint32_t)(now - since) >= extra_ms)  active = false;
+    } else if (extra_ms && prev_drain && !draining && !(b1_want & HEAT)) {
+      active = true; since = now; runs++; started = true;             // drain just ended
+    }
+    prev_drain = draining;
+    return started;
+  }
+
+  uint8_t apply(uint8_t b1) const {
+    if (!active) return b1;
+    // Drain forced on, intake forced off: the panel waits at its fill stage
+    // because the count cannot advance, which is exactly the pause we need.
+    return (uint8_t)((b1 | DRAIN) & (uint8_t)~LOAD_INTAKE);
+  }
+  uint32_t remainMs(uint32_t now) const {
+    if (!active) return 0;
+    const uint32_t gone = now - since;
+    return gone >= extra_ms ? 0 : extra_ms - gone;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Over-temperature cutout for PANEL-run cycles
 // ---------------------------------------------------------------------------
 // This exists because of a trade, and the trade should be written down.

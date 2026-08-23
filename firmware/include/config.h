@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.7.0"
+#define FW_VERSION  "1.9.0"
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -203,6 +203,32 @@
 // reached 99 C, so anything at or below that would break normal operation --
 // this is a runaway backstop, not a setpoint. Byte 1 is uncalibrated and reads
 // LOW, so the real water temperature is higher than the number. 0 disables.
+// Extra drain time for PANEL-run cycles, on top of the machine's own fixed
+// stage. Measured on this install: a 90-count charge needs 160 s to clear a
+// restricted line against a 28 s stage, so 132 s is the shortfall. 0 disables.
+// Keep it close to what the line actually needs -- the drain pump runs dry for
+// whatever time is left over.
+#define DRAIN_EXTRA_MS_DEFAULT  0UL
+
+// ---------------------------------------------------------------------------
+// Stuck-load watchdog
+// ---------------------------------------------------------------------------
+// The controller locks out on status bit 6 and then ignores the panel's
+// end-of-cycle release, leaving the blower and air heater energised -- observed
+// holding 52-55 C for 88 minutes with the panel commanding nothing. Nothing on
+// the link can stop that, so the plug is cut instead.
+//
+// The dwell has to be long enough to TELL THE TWO APART. A machine settling
+// after a cycle cools at ~0.6 C/min, so 180 s of dwell yields only ~1.8 C of
+// drop -- under the 2 C the peak comparison needs, meaning a merely-warm
+// machine would have had its mains cut. 300 s yields ~3 C, which resolves
+// cleanly, and is still five minutes against the 88 that were observed.
+// 40 C floor because a cool machine is not worth cutting mains over.
+// 0 disables.
+#define STUCK_DWELL_MS_DEFAULT  300000UL
+#define STUCK_HOT_C             40
+#define STUCK_OFF_S             30
+
 #define HEAT_CEILING_C          105
 #define HEAT_RELEASE_C          95
 

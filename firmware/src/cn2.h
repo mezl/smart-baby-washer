@@ -185,6 +185,25 @@ uint32_t fillStallMs();
 
 // ---- heater ceiling (panel-run cycles) ------------------------------------
 // The replacement guard for masking status bit 6. See cn2core::HeatCeiling.
+// ---- drain extension (panel-run cycles) -----------------------------------
+// Holds DRAIN on and INTAKE off past the machine's fixed drain stage. The panel
+// waits at its fill because the flow count cannot advance. See cn2core.
+// ---- stuck-load watchdog --------------------------------------------------
+// Cuts mains via the Kasa plug when the panel is idle, bit 6 is set, and the
+// sump is not cooling. See cn2core::StuckLoad and config.h.
+void     setStuckWatch(uint32_t dwell_ms, uint8_t hot_c, uint16_t off_s);
+uint32_t stuckDwellMs();
+uint8_t  stuckHotC();
+uint16_t stuckOffS();
+uint32_t stuckFires();
+bool     stuckArmed();
+
+void     setDrainExtra(uint32_t ms);   // 0 disables, persisted
+uint32_t drainExtraMs();
+bool     drainExtending();
+uint32_t drainExtendRemainMs();
+uint32_t drainExtendRuns();
+
 void     setHeatCeiling(uint8_t c);  // 0 disables, persisted
 uint8_t  heatCeilingC();
 bool     heatCeilingCut();

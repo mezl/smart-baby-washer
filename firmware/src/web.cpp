@@ -11,6 +11,7 @@
 #include <cn2core.h>
 
 #include "cn2.h"
+#include "kasa.h"
 #include "net.h"
 
 namespace web {
@@ -1426,6 +1427,16 @@ static String statusJson() {
   j += ",\"e5f_leaks\":" + String(cn2::e5FilterLeaks());
   j += ",\"e5f_doubt\":" + String(cn2::e5FilterDoubt());
   j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
+  j += ",\"kasa_ip\":\"" + String(kasa::plugIp()) + "\"";
+  j += ",\"stuck_ms\":" + String(cn2::stuckDwellMs());
+  j += ",\"stuck_c\":" + String(cn2::stuckHotC());
+  j += ",\"stuck_off\":" + String(cn2::stuckOffS());
+  j += ",\"stuck_armed\":" + String(cn2::stuckArmed() ? "true" : "false");
+  j += ",\"stuck_fires\":" + String(cn2::stuckFires());
+  j += ",\"dext_ms\":" + String(cn2::drainExtraMs());
+  j += ",\"dext_on\":" + String(cn2::drainExtending() ? "true" : "false");
+  j += ",\"dext_left\":" + String(cn2::drainExtendRemainMs());
+  j += ",\"dext_runs\":" + String(cn2::drainExtendRuns());
   j += ",\"hceil_c\":" + String(cn2::heatCeilingC());
   j += ",\"hceil_cut\":" + String(cn2::heatCeilingCut() ? "true" : "false");
   j += ",\"hceil_n\":" + String(cn2::heatCeilingCuts());
@@ -1603,6 +1614,52 @@ void begin() {
       ",\"pin\":" + String(cn2::wsRelayPin()) +
       ",\"low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false") +
       ",\"why\":\"" + String(cn2::wsRelayWhy()) + "\"}");
+  });
+
+  //   POST /api/kasa?ip=192.168.14.123        — set the plug
+  //   POST /api/kasa?test=1                   — probe it
+  //   POST /api/kasa?cycle=30                 — power-cycle NOW (refuses mid-cycle)
+  s_server.on("/api/kasa", HTTP_POST, []() {
+    if (s_server.hasArg("ip")) kasa::setPlug(s_server.arg("ip").c_str());
+    String extra = "";
+    if (s_server.hasArg("test"))
+      extra = ",\"reachable\":" + String(kasa::reachable() ? "true" : "false");
+    if (s_server.hasArg("cycle")) {
+      // Never cut mains to a machine that is doing something.
+      if (cn2::panelB1() != 0 || cn2::cycleState() == 1) {
+        s_server.send(409, "application/json",
+          "{\"ok\":false,\"err\":\"loads are commanded — refusing\"}");
+        return;
+      }
+      extra += ",\"cycled\":" +
+               String(kasa::powerCycle((uint16_t)s_server.arg("cycle").toInt())
+                      ? "true" : "false");
+    }
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"plug\":\"" + String(kasa::plugIp()) + "\"" + extra +
+      ",\"err\":\"" + String(kasa::lastError()) + "\"}");
+  });
+
+  //   POST /api/stuckwatch?ms=180000&c=40&off=30   (ms=0 disables)
+  s_server.on("/api/stuckwatch", HTTP_POST, []() {
+    cn2::setStuckWatch(s_server.hasArg("ms") ? s_server.arg("ms").toInt()
+                                             : cn2::stuckDwellMs(),
+                       (uint8_t)(s_server.hasArg("c") ? s_server.arg("c").toInt() : 0),
+                       (uint16_t)(s_server.hasArg("off") ? s_server.arg("off").toInt() : 0));
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"ms\":" + String(cn2::stuckDwellMs()) +
+      ",\"c\":" + String(cn2::stuckHotC()) +
+      ",\"off\":" + String(cn2::stuckOffS()) +
+      ",\"fires\":" + String(cn2::stuckFires()) + "}");
+  });
+
+  //   POST /api/drainextra?ms=132000   (0 disables)
+  s_server.on("/api/drainextra", HTTP_POST, []() {
+    if (s_server.hasArg("ms")) cn2::setDrainExtra(s_server.arg("ms").toInt());
+    s_server.send(200, "application/json",
+      "{\"ok\":true,\"ms\":" + String(cn2::drainExtraMs()) +
+      ",\"active\":" + String(cn2::drainExtending() ? "true" : "false") +
+      ",\"runs\":" + String(cn2::drainExtendRuns()) + "}");
   });
 
   //   POST /api/heatceiling?c=105      (0 disables)
