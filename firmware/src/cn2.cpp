@@ -10,6 +10,9 @@ extern "C" uint64_t esp_rtc_get_time_us(void);
 #include <cn2core.h>
 
 #include <Preferences.h>
+#include "esp_rom_gpio.h"
+#include "soc/gpio_sig_map.h"
+#include "soc/gpio_struct.h"
 #include <esp_timer.h>
 
 #include "config.h"
@@ -321,6 +324,54 @@ static HardwareSerial &uPanel = Serial1;
 static int8_t s_pin_rxb = PIN_RX_BOARD, s_pin_txb = PIN_TX_BOARD;
 static int8_t s_pin_txp = PIN_TX_PANEL, s_pin_rxp = PIN_RX_PANEL;
 
+// WIRE mode: the two CN2 signal paths are bridged pad-to-pad inside the GPIO
+// matrix (SIG_IN_FUNC 97/98 -- the C3's dedicated pad-bypass signals), so
+// forwarding happens in silicon with nanosecond latency and NO dependence on
+// the CPU, FreeRTOS, WiFi or flash stalls. The UARTs keep LISTENING on the
+// same pads (an input pad can feed any number of matrix signals), so decode,
+// graphs, HA and the lockout webhook all still work. What stops working is
+// everything that rewrites: overrides, the E5 mask, the cycle runner -- their
+// TX bytes go to a detached signal and vanish.
+//
+// Why this exists: on 2026-08-23 the touch-panel unit's controller was proved
+// to lock BECAUSE of the module's presence (machine ran clean the moment the
+// ESP32 was unplugged). The data path was byte-perfect the whole time; the
+// suspect is store-and-forward DELIVERY -- a stalled task bunches panel
+// frames, and this controller latches its starvation bit where the old one
+// only flashed E5. The comment in openPorts() about FIFO batching pushing
+// the panel outside the response window was the same lesson, milder.
+static bool s_wire = false;
+
+bool wire() { return s_wire; }
+
+bool wireSet(bool on) {
+  if (s_pin_txb < 0 || s_pin_txp < 0) return false;   // LISTEN drives nothing
+  if (on == s_wire) return true;
+  if (on) {
+    // controller out -> panel-in pad, panel out -> controller-in pad
+    esp_rom_gpio_connect_in_signal(s_pin_rxb, SIG_IN_FUNC_97_IDX, false);
+    esp_rom_gpio_connect_out_signal(s_pin_txp, SIG_IN_FUNC_97_IDX, false, false);
+    esp_rom_gpio_connect_in_signal(s_pin_rxp, SIG_IN_FUNC_98_IDX, false);
+    esp_rom_gpio_connect_out_signal(s_pin_txb, SIG_IN_FUNC_98_IDX, false, false);
+    // Output enable from the GPIO enable register, not the (now absent)
+    // peripheral -- the bridge signals carry data only.
+    GPIO.func_out_sel_cfg[s_pin_txp].oen_sel = 1;
+    GPIO.func_out_sel_cfg[s_pin_txb].oen_sel = 1;
+    GPIO.enable_w1ts.enable_w1ts = (1UL << s_pin_txp) | (1UL << s_pin_txb);
+  } else {
+    // Hand the TX pads back to the UARTs.
+    GPIO.func_out_sel_cfg[s_pin_txp].oen_sel = 0;
+    GPIO.func_out_sel_cfg[s_pin_txb].oen_sel = 0;
+    uPanel.setPins(s_pin_rxp, s_pin_txp);
+    uBoard.setPins(s_pin_rxb, s_pin_txb);
+  }
+  s_wire = on;
+  s_prefs.putBool("wire", on);
+  Serial.printf("[link ] %s\n", on ? "WIRE: pads bridged in the GPIO matrix"
+                                    : "CPU relay: UARTs own the TX pads");
+  return true;
+}
+
 static void openPorts() {
   int8_t txBoard = s_pin_txb;
   int8_t txPanel = s_pin_txp;
@@ -412,6 +463,10 @@ void begin() {
   }
   cycleLoad();                 // stage durations survive a reboot
   openPorts();
+  // Wire is the boot DEFAULT (NVS-overridable): the machine's link comes up
+  // as silicon before WiFi is even started, so nothing this firmware does --
+  // boot, OTA, HTTP, a crash -- can starve the controller of panel frames.
+  if (s_prefs.getBool("wire", true)) wireSet(true);
   if (!s_task) {
     xTaskCreate(relayTask, "cn2relay", 3072, nullptr, 10, &s_task);
     Serial.println("[cn2  ] relay task started (priority 10)");

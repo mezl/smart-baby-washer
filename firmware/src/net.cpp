@@ -67,6 +67,12 @@ void begin() {
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(OTA_HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Cap TX power. The ESP32 is fed from CN2 pin 4 -- a rail sized for a button
+  // panel -- and full-power TX bursts approach 300 mA. The rail is one of the
+  // two suspects for the touch-panel controller's lockouts (the other, frame
+  // delivery timing, is closed by WIRE mode). 11 dBm still crosses the house
+  // comfortably and roughly halves the peak draw.
+  WiFi.setTxPower(WIFI_POWER_11dBm);
 
   Serial.printf("[wifi] joining \"%s\"", WIFI_SSID);
   uint32_t t0 = millis();

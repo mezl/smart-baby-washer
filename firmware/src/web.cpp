@@ -1470,6 +1470,7 @@ static String statusJson() {
   j += ",\"spoof\":" + String(cn2::spoofOn() ? "true" : "false");
   j += ",\"spoof_sent\":" + String(cn2::spoofCount());
   j += ",\"spoof_frame\":\"" + cn2::spoofFrameHex() + "\"";
+  j += ",\"wire\":" + String(cn2::wire() ? "true" : "false");
   j += ",\"pure\":" + String(cn2::pure() ? "true" : "false");
   j += ",\"locked_ms\":" + String(cn2::lockedForMs());
   j += ",\"hook_fired\":" + String(hook::fired());
@@ -1800,6 +1801,16 @@ void begin() {
   });
 
   //   POST /api/pinprobe?pin=3    — transmit stubs only
+  // WIRE mode: pad-to-pad bridge in the GPIO matrix. The default. Sniffing
+  // continues; every rewrite feature goes dormant until this is turned off.
+  s_server.on("/api/wire", HTTP_POST, []() {
+    bool ok = true;
+    if (s_server.hasArg("on")) ok = cn2::wireSet(s_server.arg("on").toInt() != 0);
+    s_server.send(200, "application/json",
+      String("{\"ok\":") + (ok ? "true" : "false") +
+      ",\"wire\":" + (cn2::wire() ? "true" : "false") + "}");
+  });
+
   // Resume the NVS-persisted cycle after the lockout recovery's mains cut.
   // Called by the HA watchdog after a probe-verified unlock -- deliberately an
   // explicit external command, never something the board does on its own boot.
