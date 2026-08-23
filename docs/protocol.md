@@ -138,10 +138,16 @@ resets the assembler. Length still decides where a frame *ends*.
 ```
   A2  23  00  02  04  0D  02  88
   |   |   |   |   |   |   |   `- XOR of bytes 0..6
-  |   |   |   |   |   |   `----- 0x02 on the early unit, 0x03 on the later one.
-  |   |   |   |   |   |           Constant within a machine, different between
-  |   |   |   |   |   |           them: a revision marker, not a constant. It is
-  |   |   |   |   |   |           the ONLY byte whose value differs by revision.
+  |   |   |   |   |   |   `----- 0x02 on one machine, 0x03 on the other.
+  |   |   |   |   |   |           NOT a board revision: both boards were
+  |   |   |   |   |   |           photographed and carry the SAME part number
+  |   |   |   |   |   |           BBW04001-UL-P, the same revision QM-V7
+  |   |   |   |   |   |           20250805 and the same laminate markings --
+  |   |   |   |   |   |           only the QC date differs (2026.1.25 vs
+  |   |   |   |   |   |           2026.1.1). Same hardware, different value, so
+  |   |   |   |   |   |           it identifies something the BOARD does not:
+  |   |   |   |   |   |           model variant, panel type, or MCU firmware
+  |   |   |   |   |   |           build. Unresolved.
   |   |   |   |   |   `--------- unknown, 5..14 — NOT a temperature
   |   |   |   |   `------------- constant 0x04, unknown
   |   |   |   `----------------- STATUS BITFIELD
