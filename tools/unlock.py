@@ -15,9 +15,11 @@ from kasa import call
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "192.168.14.13"
 PLUG = sys.argv[2] if len(sys.argv) > 2 else "192.168.14.123"
-# Refined by measurement, not guessed: 60 s cleared it at 33-35 C; 60/90 s
-# failed at 39 C and 60/90/150 s failed at 45 C. So the gate is temperature and
-# it sits below ~36 C -- no cut is long enough above that.
+# 36 C is where it has EVER cleared, not a threshold that reliably works.
+# 60 s cleared it at 33-35 C once; 60/90 s failed at 39 C and 60/90/150 s failed
+# at 45 C -- but three 60 s cuts at 33-34 C also failed the next day. Same
+# temperature, same duration, opposite result. Treat this as "keep trying in the
+# band where it has worked", not as a rule.
 TRY_BELOW = 36
 OFF_S     = 60
 
