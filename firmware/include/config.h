@@ -5,7 +5,14 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.12.0"
+#define FW_VERSION  "1.13.1"
+
+// Lockout webhook: how long bit 6 must be held before summoning the HA
+// watchdog, and the floor between calls. The hold is deliberately longer than
+// the E5 filter's 25-frame debounce -- the webhook power-cycles the machine,
+// so it answers to a higher bar than masking a display code does.
+#define LOCK_HOOK_HOLD_MS    15000UL
+#define LOCK_HOOK_REPEAT_MS  300000UL
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and

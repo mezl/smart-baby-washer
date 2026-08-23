@@ -20,6 +20,7 @@
 #include "config.h"
 #include "cn2.h"
 #include "kasa.h"
+#include "hook.h"
 #include "net.h"
 #include "web.h"
 
@@ -134,6 +135,7 @@ void setup() {
                    "Power-cycle to clear.");
   } else {
     kasa::begin();
+    hook::begin();
     cn2::begin();
     Serial.printf("[cn2  ] link open %lu ms after boot\n",
                   (unsigned long)millis());
@@ -171,6 +173,7 @@ void loop() {
   esp_task_wdt_reset();
 
   net::loop();     // ArduinoOTA.handle() + link watchdog
+  if (!g_safe_mode) hook::tick();
   web::loop();
   if (!g_safe_mode) cn2::loop();
 

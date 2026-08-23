@@ -12,6 +12,7 @@
 
 #include "cn2.h"
 #include "kasa.h"
+#include "hook.h"
 #include "net.h"
 
 namespace web {
@@ -1470,6 +1471,8 @@ static String statusJson() {
   j += ",\"spoof_sent\":" + String(cn2::spoofCount());
   j += ",\"spoof_frame\":\"" + cn2::spoofFrameHex() + "\"";
   j += ",\"pure\":" + String(cn2::pure() ? "true" : "false");
+  j += ",\"locked_ms\":" + String(cn2::lockedForMs());
+  j += ",\"hook_fired\":" + String(hook::fired());
   j += ",\"edit_c\":" + String(cn2::editC());
   j += ",\"edit_p\":" + String(cn2::editP());
   j += ",\"worst_gap_us\":" + String(cn2::worstGapUs());
@@ -1797,6 +1800,26 @@ void begin() {
   });
 
   //   POST /api/pinprobe?pin=3    — transmit stubs only
+  // Resume the NVS-persisted cycle after the lockout recovery's mains cut.
+  // Called by the HA watchdog after a probe-verified unlock -- deliberately an
+  // explicit external command, never something the board does on its own boot.
+  s_server.on("/api/cycle_recover", HTTP_POST, []() {
+    const bool ok = cn2::cycleRecover();
+    s_server.send(200, "application/json",
+      String("{\"recovered\":") + (ok ? "true" : "false") +
+      ",\"state\":" + String(cn2::cycleState()) +
+      ",\"stage\":" + String(cn2::cycleStage()) + "}");
+  });
+
+  // Where the lockout webhook points (an HA webhook URL). Empty disables.
+  s_server.on("/api/hook", HTTP_POST, []() {
+    if (s_server.hasArg("url")) hook::setUrl(s_server.arg("url").c_str());
+    s_server.send(200, "application/json",
+      String("{\"url\":\"") + hook::url() + "\"" +
+      ",\"fired\":" + String(hook::fired()) +
+      ",\"last\":\"" + String(hook::lastResult()) + "\"}");
+  });
+
   // Byte-perfect on demand. Turning this on strips every rewrite at the emit
   // point, so the E5 mask, the heat ceiling and the cycle runner all stop
   // acting -- it is a diagnostic and a fallback, not an operating mode.

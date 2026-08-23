@@ -122,6 +122,7 @@ uint32_t lastOtaGapMs();
 void     markOtaStart();     // stamp, just before the image is written
 void     serviceNow();       // forward anything pending, from another task
 
+uint32_t lockedForMs();   // 0 = bit 6 clear; else how long it has been held
 bool     pure();
 void     setPure(bool on);
 uint32_t editC();
@@ -323,6 +324,11 @@ void        cycleStop();
 // pause waits for this, because the lid is observable from here and a refilled
 // tank is not.
 void        cycleResume();
+// Resume the NVS-persisted cycle after a reboot (the lockout recovery is a
+// mains cut, which reboots this board too). Restarts the interrupted stage
+// from zero. False if nothing was persisted or a cycle is already running.
+// Called by the HA watchdog after a verified unlock -- never automatically.
+bool        cycleRecover();
 bool        cycleRunning();
 uint8_t     cycleState();      // 0 idle, 1 running, 2 done, 3 aborted, 4 paused
 uint8_t     cycleStage();

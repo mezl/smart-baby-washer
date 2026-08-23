@@ -50,6 +50,18 @@ IDLE_STREAK = 2     # ~2 poll periods locked while idle before acting
 LOAD_STREAK = 3     # a little more patience if loads are commanded
 CUTS = [120, 180, 300, 600]   # 60 s omitted: 0 for 4 in the field log
 
+# Circuit breaker. On 2026-08-23 the controller degraded to re-locking within
+# 27-65 s of every verified unlock -- four times in fifteen minutes. Recovery
+# cannot outrun that, and without a breaker this script would power-cycle the
+# machine every ~3 minutes indefinitely (relay wear, water use, log spam, and
+# a false promise of a working machine). After BREAK_N unlocks inside
+# BREAK_WINDOW_S, cuts are suspended for BREAK_COOLDOWN_S. The exception is a
+# lock with loads still commanded (pb1 != 0): latched 120 V loads are the one
+# thing always worth a cut, cooldown or not.
+BREAK_N          = 3
+BREAK_WINDOW_S   = 1800
+BREAK_COOLDOWN_S = 3600
+
 def log(msg):
     line = time.strftime("[%Y-%m-%d %H:%M:%S] ") + msg
     with io.open(LOG, "a") as f:
@@ -148,6 +160,22 @@ def rec(temp, cut, bit6, prob):
         f.write("%s,%s,%s,%s,%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
                                       temp, cut, bit6, prob))
 
+def breaker_note(st, d):
+    now = time.time()
+    fires = [t for t in st.get("fires", []) if now - t < BREAK_WINDOW_S]
+    st["fires"] = fires
+    if st.get("cooldown_until", 0) > now:
+        return True
+    if len(fires) >= BREAK_N:
+        st["cooldown_until"] = now + BREAK_COOLDOWN_S
+        save_state(st)
+        log("BREAKER OPEN: %d unlocks in %d min -- the controller re-locks "
+            "faster than recovery can clear it. Suspending cuts for %d min. "
+            "This is a failing controller, not a recoverable state."
+            % (len(fires), BREAK_WINDOW_S // 60, BREAK_COOLDOWN_S // 60))
+        return True
+    return False
+
 def load_state():
     try:
         with io.open(STATE) as f:
@@ -158,6 +186,27 @@ def load_state():
 def save_state(st):
     with io.open(STATE, "w") as f:
         json.dump(st, f)
+
+def recover_cycle():
+    """After a verified unlock, resume the cycle the ESP32 persisted to NVS.
+
+    The board persists progress at every stage boundary precisely because this
+    watchdog's cure is a mains cut that reboots it. Recovery is an explicit
+    external command (never boot-automatic on the board), and only issued here
+    -- after the flow probe has proven the controller will actually act on the
+    loads the resumed cycle is about to command."""
+    for _ in range(3):
+        try:
+            r = urllib.request.Request(f"http://{ESP}/api/cycle_recover",
+                                       method="POST")
+            with urllib.request.urlopen(r, timeout=6) as f:
+                d = json.load(f)
+            if d.get("recovered"):
+                log("resumed the interrupted cycle at stage %s" % d.get("stage"))
+            return
+        except Exception:
+            time.sleep(1)
+    log("cycle_recover call failed (board may have had nothing to resume)")
 
 def unlock():
     """Escalating cuts, each restore unconditional, each result verified."""
@@ -190,13 +239,19 @@ def unlock():
             {True: 1, False: 0, None: ""}[prob])
         if not bit6 and prob:
             log("UNLOCKED by a %ds cut, verified by flow probe" % cut)
+            recover_cycle()
             return True
         log("%ds cut: bit6=%d probe=%s -- escalating" % (cut, bit6, prob))
         time.sleep(60)
     log("all cuts exhausted; still locked")
     return False
 
-def run():
+def run(now=False):
+    """now=True is the webhook path: the ESP32 says the controller just locked
+    (it debounces 15 s of held bit 6 before calling). Verify independently with
+    two reads 10 s apart, then act without waiting out the poll streak -- this
+    is what turns 'the dryer ran all night' into 'the dryer ran three minutes'.
+    """
     st = load_state()
     d = g()
     if d is None:
@@ -217,18 +272,37 @@ def run():
         if st.get("streak"):
             save_state({"streak": 0})
         return
-    st["streak"] = st.get("streak", 0) + 1
-    save_state(st)
-    idle = (d.get("pb1", 0) == 0) and (d.get("state", 0) == 0)
-    need = IDLE_STREAK if idle else LOAD_STREAK
-    log("locked (byte3=0x%02X, %s C, %s) streak %d/%d"
-        % (d["st_real"], d.get("temp_real", "?"),
-           "idle" if idle else "loads 0x%02X" % d.get("pb1", 0),
-           st["streak"], need))
-    if st["streak"] < need:
+    loads = d.get("pb1", 0) != 0
+    if breaker_note(st, d) and not loads:
         return
+    if now:
+        time.sleep(10)
+        d2 = g()
+        if d2 is None or not (d2["st_real"] & 0x40):
+            log("webhook: lock not confirmed on re-read -- standing down")
+            return
+        log("webhook: lock confirmed (byte3=0x%02X, %s C) -- acting now"
+            % (d2["st_real"], d2.get("temp_real", "?")))
+    else:
+        st["streak"] = st.get("streak", 0) + 1
+        save_state(st)
+        idle = (d.get("pb1", 0) == 0) and (d.get("state", 0) == 0)
+        need = IDLE_STREAK if idle else LOAD_STREAK
+        log("locked (byte3=0x%02X, %s C, %s) streak %d/%d"
+            % (d["st_real"], d.get("temp_real", "?"),
+               "idle" if idle else "loads 0x%02X" % d.get("pb1", 0),
+               st["streak"], need))
+        if st["streak"] < need:
+            return
     ok = unlock()
-    save_state({"streak": 0})
+    st = load_state()
+    st["streak"] = 0
+    # Count the ATTEMPT, not the success. A controller that stays locked
+    # through a full escalation must open the breaker just as surely as one
+    # that re-locks after every clean unlock -- otherwise a permanently dead
+    # controller earns an endless loop of 25-minute cut sequences.
+    st.setdefault("fires", []).append(time.time())
+    save_state(st)
     log("unlock %s" % ("succeeded" if ok else "FAILED -- will retry next poll"))
 
 if __name__ == "__main__":
@@ -238,7 +312,8 @@ if __name__ == "__main__":
         # escalation takes up to ~25 min.
         import subprocess
         subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--child"],
+            [sys.executable, os.path.abspath(__file__), "--child"]
+            + [a for a in sys.argv[1:] if a == "--now"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
         sys.exit(0)
@@ -248,7 +323,7 @@ if __name__ == "__main__":
     except OSError:
         sys.exit(0)          # an unlock is already in progress
     try:
-        run()
+        run(now="--now" in sys.argv)
     except Exception as e:
         log("ERROR: %r" % e)
         # Belt and braces: whatever happened, do not leave the plug off.

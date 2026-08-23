@@ -216,6 +216,7 @@ static cn2core::FrameTx s_bp_tx;
 // so it disables all rewriting in both directions regardless of which feature
 // asked for it, now or later.
 static bool     s_pure   = false;
+static uint32_t s_lock_ms = 0;      // millis when bit 6 was first seen held
 static uint32_t s_edit_c = 0;   // bytes we changed, controller->panel
 static uint32_t s_edit_p = 0;   // bytes we changed, panel->controller
 static cn2core::FramePos s_bp_pos;   // byte index, counted not timed
@@ -713,6 +714,11 @@ static void pump() {
       }
       s_lid_fwd = !cn2core::lidClosed(out);         // what the panel will see
       s_st_real = b; s_st_fwd = out;
+      // Continuous hold time of the lockout bit, for the webhook that summons
+      // the HA watchdog. Duration, not an edge: a single-frame glitch (we have
+      // captured exactly one, ever) must not power-cycle the machine.
+      if (b & 0x40) { if (!s_lock_ms) s_lock_ms = millis() | 1; }
+      else s_lock_ms = 0;
     }
     // Recompute the checksum whenever ANY byte of this frame was altered.
     //
@@ -1212,6 +1218,34 @@ static char     s_cyc_why[48] = "";
 static uint32_t s_cyc_held = 0;      // seconds already spent in the paused stage
 static bool     s_cyc_lidpause = false;   // paused BY the lid: auto-resumes
 
+// Cycle progress survives a mains cut. The lockout recovery is a power cycle
+// at the plug, and the plug also powers this board -- so without this, every
+// recovery converts a running cycle into an idle machine with clean water in
+// it and nobody the wiser. Written at stage boundaries only (a handful of NVS
+// writes per cycle, not a wear problem), erased on any normal exit.
+//
+// Deliberately NOT replayed automatically at boot: a stale record must never
+// start pumps on its own after, say, a week-old crash. The HA watchdog calls
+// /api/cycle_recover after it has power-cycled the machine AND verified with
+// the flow probe that the controller is accepting commands again. Recovery
+// restarts the interrupted stage from zero -- fills re-measure their own flow,
+// and s_cyc_water carries over because the water is physically still there.
+// The writes are DEFERRED to the main loop (persistTick). cycPersist is
+// called from cycleTick, which runs in relayTask -- and an NVS write is a
+// flash operation that stalls the single C3 core well past the task
+// watchdog's patience. The first build that wrote directly from relayTask
+// panicked the board at the first fill->wash boundary of a live cycle.
+// relayTask only snapshots and raises a flag; the flash work happens where
+// every other NVS write in this codebase already happens.
+static volatile uint8_t s_cyc_save = 0;   // 0 idle, 1 write record, 2 clear
+static uint8_t s_cyc_save_m = 0, s_cyc_save_i = 0;
+static bool    s_cyc_save_w = false;
+static void cycPersist() {
+  s_cyc_save_m = s_mode; s_cyc_save_i = s_cyc_i; s_cyc_save_w = s_cyc_water;
+  s_cyc_save = 1;
+}
+static void cycPersistClear() { s_cyc_save = 2; }
+
 static void cycApply(const Stage &s) {
   s_p1_clr = 0xFF; s_p1_set = s.loads;          // byte 1 becomes exactly this
   s_p2_ovr = (s.t2 || s.t3) ? s.t2 : 0;
@@ -1231,6 +1265,7 @@ static void cycPause(const char *why, bool by_lid) {
 
 static void cycAbort(const char *why) {
   cycRelease();
+  cycPersistClear();
   s_cyc_state = ST_ABORT;
   snprintf(s_cyc_why, sizeof(s_cyc_why), "%s", why);
   Serial.printf("[cycle] ABORT: %s\n", why);
@@ -1594,11 +1629,31 @@ void cycleStart() {
   s_cyc_i = 0; s_cyc_t0 = millis(); s_cyc_water = false;
   s_cyc_flow_ms = millis(); s_cyc_flow_prev = 0; s_cyc_flow_max = 0;
   s_cyc_why[0] = 0; s_cyc_state = ST_RUN;
+  cycPersist();
   cycApply(STG[0]);
   Serial.println("[cycle] started");
 }
+
+bool cycleRecover() {
+  if (s_cyc_state == ST_RUN || s_cyc_state == ST_PAUSE) return false;
+  if (!s_prefs.getBool("cyc_on", false)) return false;
+  const uint8_t m = s_prefs.getUChar("cyc_m", 0);
+  const uint8_t i = s_prefs.getUChar("cyc_i", 0);
+  if (m >= PROG_N) { cycPersistClear(); return false; }
+  cycleSetMode(m);
+  if (i >= STG_N)  { cycPersistClear(); return false; }
+  s_cyc_i = i; s_cyc_t0 = millis();
+  s_cyc_water = s_prefs.getBool("cyc_w", false);
+  s_cyc_flow_ms = millis(); s_cyc_flow_prev = 0; s_cyc_flow_max = 0;
+  s_cyc_why[0] = 0; s_cyc_state = ST_RUN;
+  cycApply(STG[i]);
+  Serial.printf("[cycle] RECOVERED: %s at stage %u/%u\n",
+                cycleModeName(m), i + 1, STG_N);
+  return true;
+}
 void cycleStop() {
   cycRelease();
+  cycPersistClear();
   s_cyc_state = ST_IDLE; s_cyc_why[0] = 0;
   Serial.println("[cycle] stopped by request");
 }
@@ -1882,13 +1937,14 @@ static void cycleTick() {
   if (s.loads & 0x02) s_cyc_water = false;      // a drain empties it again
 
   if (++s_cyc_i >= STG_N) {
-    cycRelease(); s_cyc_state = ST_DONE;
+    cycRelease(); cycPersistClear(); s_cyc_state = ST_DONE;
     Serial.println("[cycle] complete");
     return;
   }
   Stage &n = STG[s_cyc_i];
   if (n.needs_water && !s_cyc_water) { cycAbort("heater stage with no verified fill"); return; }
   s_cyc_t0 = millis(); s_cyc_flow_ms = millis(); s_cyc_flow_max = 0;
+  cycPersist();
   cycApply(n);
   Serial.printf("[cycle] stage %u/%u: %s\n", s_cyc_i+1, STG_N, n.name);
 }
@@ -1995,6 +2051,7 @@ static void closePorts() {
   uPanel.end();
 }
 
+uint32_t lockedForMs() { return s_lock_ms ? (millis() - s_lock_ms) : 0; }
 bool     pure()       { return s_pure; }
 void     setPure(bool on) { s_pure = on; }
 uint32_t editC()      { return s_edit_c; }
@@ -2336,7 +2393,22 @@ String lastFrameHex(uint8_t side) {
 }
 void     resetGap()   { s_late_us = 0; }
 
-void loop() { /* forwarding now runs in relayTask() */ }
+void loop() {
+  // Forwarding runs in relayTask(); the only work here is flushing the cycle
+  // persistence record, so the flash writes happen in this task, never there.
+  const uint8_t want = s_cyc_save;
+  if (want) {
+    s_cyc_save = 0;
+    if (want == 1) {
+      s_prefs.putUChar("cyc_m", s_cyc_save_m);
+      s_prefs.putUChar("cyc_i", s_cyc_save_i);
+      s_prefs.putBool("cyc_w", s_cyc_save_w);
+      s_prefs.putBool("cyc_on", true);
+    } else if (s_prefs.getBool("cyc_on", false)) {
+      s_prefs.putBool("cyc_on", false);
+    }
+  }
+}
 
 void setLidMode(uint8_t m) {
   s_lid_mode = (m > 2) ? 0 : m;
