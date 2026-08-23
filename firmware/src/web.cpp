@@ -118,6 +118,12 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
   <div class=sub id=loadsub></div>
   <div class=loads id=loads></div>
   <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:10px">RELEASE ALL</button>
+  <button class=go id=lcut style="background:#5c1d1d;border-color:#f85149;color:#ffecec;margin-top:8px;display:none">CUT MAINS</button>
+  <div class=warn2 id=cutnote style="display:none">Cuts power at the smart plug &mdash;
+    the only way to stop a load the controller has latched on. <b>The machine stays
+    off.</b> This board is powered by the plug, so it cannot switch itself back on
+    (tested: the plug's countdown is cancelled by the relay change, and a one-off
+    schedule does not fire). Restore it in the Kasa app.</div>
   <div class=warn2>Tap drives that load on the real machine &mdash; no cycle, no
     water check, no interlock. Blue means the machine is driving it; green means
     you are. The heater bits will boil a dry sump.</div>
@@ -166,6 +172,19 @@ function lbit(k){
   post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16));
 }
 $('lrel').onclick=()=>{ LSET=0; post('/api/panel_ovr?clr=0&set=0'); };
+
+// Cutting mains needs two taps. It is the one control here that the machine
+// cannot undo -- and neither can this board, which the plug also powers.
+let CUTARM=0;
+$('lcut').onclick=()=>{
+  if(!CUTARM){
+    CUTARM=1; $('lcut').textContent='TAP AGAIN TO CUT MAINS';
+    setTimeout(()=>{CUTARM=0;$('lcut').textContent='CUT MAINS'},4000);
+    return;
+  }
+  CUTARM=0; $('lcut').textContent='cutting...';
+  post('/api/kasa?cycle=1');
+};
 function drawLoads(a){
   LSET = a.p1_set|0;
   const fwd = a.pb1_fwd|0, real = a.pb1|0;
@@ -175,6 +194,9 @@ function drawLoads(a){
     return `<div class="${cls}" onclick="lbit(${k})">${n}`
          + `<small>${b} &middot; ${live?'RUNNING':'off'}</small></div>`;
   }).join('');
+  const hasplug = !!(a.plug && a.plug.length);
+  $('lcut').style.display = hasplug ? '' : 'none';
+  $('cutnote').style.display = hasplug ? '' : 'none';
   $('loadsub').innerHTML = a.locked
     ? '<span class=hot>controller locked &mdash; it will ignore these</span>'
     : (LSET ? '<span class=ok>you are driving '+LOADS.filter(([k])=>LSET>>k&1).length+' load(s)</span>'
@@ -1859,6 +1881,7 @@ void begin() {
     j += ",\"p1_set\":" + String(cn2::panelSet());
     j += ",\"p1_clr\":" + String(cn2::panelClr());
     j += ",\"locked\":" + String((cn2::statusReal() & 0x40) ? "true" : "false");
+    j += ",\"plug\":\"" + String(kasa::plugIp()) + "\"";
     j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
     if (cn2::pcycleActive()) {
       j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());
