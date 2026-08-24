@@ -122,6 +122,8 @@ uint32_t lastOtaGapMs();
 void     markOtaStart();     // stamp, just before the image is written
 void     serviceNow();       // forward anything pending, from another task
 
+int8_t   pinRxBoard(); int8_t pinTxBoard();
+int8_t   pinRxPanel(); int8_t pinTxPanel();
 bool     wire();          // pads bridged in the GPIO matrix (true wire)
 bool     wireSet(bool on);// false = LISTEN mode, nothing to bridge
 uint32_t lockedForMs();   // 0 = bit 6 clear; else how long it has been held

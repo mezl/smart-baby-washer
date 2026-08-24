@@ -13,6 +13,8 @@
 #include "cn2.h"
 #include "kasa.h"
 #include "hook.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
 #include "net.h"
 
 namespace web {
@@ -1801,6 +1803,35 @@ void begin() {
   });
 
   //   POST /api/pinprobe?pin=3    — transmit stubs only
+  // Electrical proof of the wire bridge: enable the input stage on all four
+  // CN2 pads and count level transitions for 250 ms. The two RX pads always
+  // toggle (the devices transmit regardless); the two TX pads only toggle if
+  // something is actually DRIVING them -- in wire mode that is the matrix
+  // bridge, so tx edges ~= the opposite rx edges proves the bridge conducts,
+  // and a silent tx pad proves it does not, no theory required.
+  s_server.on("/api/wirecheck", HTTP_POST, []() {
+    const int8_t pins[4] = { cn2::pinRxBoard(), cn2::pinTxBoard(),
+                             cn2::pinRxPanel(), cn2::pinTxPanel() };
+    const char *names[4] = { "rx_board", "tx_board", "rx_panel", "tx_panel" };
+    for (int i = 0; i < 4; i++)
+      if (pins[i] >= 0) gpio_ll_input_enable(&GPIO, (uint32_t)pins[i]);
+    uint32_t edges[4] = {0,0,0,0};
+    uint32_t prev = GPIO.in.data;
+    const uint32_t t0 = millis();
+    while (millis() - t0 < 250) {
+      const uint32_t cur = GPIO.in.data;
+      const uint32_t diff = cur ^ prev;
+      for (int i = 0; i < 4; i++)
+        if (pins[i] >= 0 && (diff >> pins[i]) & 1) edges[i]++;
+      prev = cur;
+    }
+    String j = "{\"wire\":" + String(cn2::wire() ? "true" : "false");
+    for (int i = 0; i < 4; i++)
+      j += ",\"" + String(names[i]) + "\":" + String(edges[i]);
+    j += "}";
+    s_server.send(200, "application/json", j);
+  });
+
   // WIRE mode: pad-to-pad bridge in the GPIO matrix. The default. Sniffing
   // continues; every rewrite feature goes dormant until this is turned off.
   s_server.on("/api/wire", HTTP_POST, []() {

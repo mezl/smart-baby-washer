@@ -342,6 +342,10 @@ static int8_t s_pin_txp = PIN_TX_PANEL, s_pin_rxp = PIN_RX_PANEL;
 // the panel outside the response window was the same lesson, milder.
 static bool s_wire = false;
 
+int8_t pinRxBoard() { return s_pin_rxb; }
+int8_t pinTxBoard() { return s_pin_txb; }
+int8_t pinRxPanel() { return s_pin_rxp; }
+int8_t pinTxPanel() { return s_pin_txp; }
 bool wire() { return s_wire; }
 
 bool wireSet(bool on) {
