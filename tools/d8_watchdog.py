@@ -91,6 +91,14 @@ def kasa(cmd, timeout=6):
     return json.loads(_crypt(buf, decrypt=True))
 
 def relay(state):
+    # DISARM: /config/d8/DISARM existing means the Kasa plug does NOT power
+    # the washer any more (Kai moved the machine to another outlet on
+    # 2026-08-23) -- cutting it would power-cycle some unrelated device.
+    # Detection, logging and the webhook all stay live; only relay writes
+    # are refused until the plug situation is re-confirmed.
+    if os.path.exists(DIR + "/DISARM"):
+        log("DISARMED: refusing relay(%s) -- plug no longer feeds the washer" % state)
+        raise RuntimeError("watchdog disarmed")
     kasa({"system": {"set_relay_state": {"state": state}}})
 
 def plug_on():
@@ -246,12 +254,24 @@ def unlock():
     log("all cuts exhausted; still locked")
     return False
 
+def ensure_logger():
+    # The telemetry logger is a plain loop; anything can kill it (HA restart
+    # took one out mid-cut once). Every watchdog pass restarts it if absent.
+    import subprocess
+    r = subprocess.run(["pgrep", "-f", "d8/logger.py"], capture_output=True)
+    if r.returncode != 0:
+        subprocess.Popen(["python3", "/config/d8/logger.py"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        log("telemetry logger (re)started")
+
 def run(now=False):
     """now=True is the webhook path: the ESP32 says the controller just locked
     (it debounces 15 s of held bit 6 before calling). Verify independently with
     two reads 10 s apart, then act without waiting out the poll streak -- this
     is what turns 'the dryer ran all night' into 'the dryer ran three minutes'.
     """
+    ensure_logger()
     st = load_state()
     d = g()
     if d is None:
