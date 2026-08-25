@@ -434,11 +434,20 @@ bool wireSet(bool on) {
     GPIO.func_out_sel_cfg[s_pin_txb].oen_sel = 1;
     GPIO.enable_w1ts.enable_w1ts = (1UL << s_pin_txp) | (1UL << s_pin_txb);
   } else {
-    // Hand the TX pads back to the UARTs.
+    // Hand the TX pads back to the UARTs -- BY FORCE. setPins() was the
+    // original implementation here and it is a silent no-op when the pin
+    // numbers have not changed: the core's peripheral bookkeeping still
+    // records the pins as attached to these UARTs, so it "skips" the matrix
+    // reattach it doesn't know the bridge stole. The consequence was a
+    // twelve-hour ghost hunt: every "CPU relay" session after the first
+    // wire engagement still forwarded through the bridge, while every
+    // override -- intake fills byte-identical to the panel's, lid forcing,
+    // the cycle runner's stages -- was written into a detached UART and
+    // never touched the wire. Reconnect the TX signals explicitly.
     GPIO.func_out_sel_cfg[s_pin_txp].oen_sel = 0;
     GPIO.func_out_sel_cfg[s_pin_txb].oen_sel = 0;
-    uPanel.setPins(s_pin_rxp, s_pin_txp);
-    uBoard.setPins(s_pin_rxb, s_pin_txb);
+    esp_rom_gpio_connect_out_signal(s_pin_txb, U0TXD_OUT_IDX, false, false);  // uBoard = Serial0
+    esp_rom_gpio_connect_out_signal(s_pin_txp, U1TXD_OUT_IDX, false, false);  // uPanel = Serial1
   }
   s_wire = on;
   s_prefs.putBool("wire", on);

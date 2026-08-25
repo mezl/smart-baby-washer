@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.15.0"
+#define FW_VERSION  "1.15.1"
 
 // Lockout webhook: how long bit 6 must be held before summoning the HA
 // watchdog, and the floor between calls. The hold is deliberately longer than
