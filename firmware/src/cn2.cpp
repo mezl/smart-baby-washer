@@ -13,6 +13,7 @@ extern "C" uint64_t esp_rtc_get_time_us(void);
 #include "esp_rom_gpio.h"
 #include "soc/gpio_sig_map.h"
 #include "soc/gpio_struct.h"
+#include "hal/gpio_ll.h"
 #include <esp_timer.h>
 
 #include "config.h"
@@ -342,11 +343,81 @@ static int8_t s_pin_txp = PIN_TX_PANEL, s_pin_rxp = PIN_RX_PANEL;
 // the panel outside the response window was the same lesson, milder.
 static bool s_wire = false;
 
+// ---- relay-path profiling -------------------------------------------------
+// Question under test: what stalls the forwarding task, how often, for how
+// long, and who is to blame. The histogram is the victim's view (gaps between
+// relayTask passes); the per-cause timers are the suspects' view (how long
+// each suspect operation actually ran). Suspects are timed at their call
+// sites: HTTP request handling, NVS flush, the lockout webhook.
+//
+// Buckets: <2ms, 2-5, 5-10, 10-20, 20-50, 50-100, >100ms.
+struct ProfCause { uint32_t n = 0; uint32_t max_us = 0; uint64_t total_us = 0; };
+static uint32_t  s_prof_hist[7] = {0};
+static uint32_t  s_prof_passes = 0;
+static uint32_t  s_prof_rxmax  = 0;      // deepest RX backlog seen at pump entry
+static ProfCause s_prof_http, s_prof_nvs, s_prof_hook;
+
+void profNote(uint8_t which, uint32_t us) {
+  ProfCause *c = which == 0 ? &s_prof_http : which == 1 ? &s_prof_nvs : &s_prof_hook;
+  c->n++; c->total_us += us; if (us > c->max_us) c->max_us = us;
+}
+void profRx(uint32_t depth) { if (depth > s_prof_rxmax) s_prof_rxmax = depth; }
+static inline void profGap(uint32_t us) {
+  s_prof_passes++;
+  int b = us < 2000 ? 0 : us < 5000 ? 1 : us < 10000 ? 2 : us < 20000 ? 3
+        : us < 50000 ? 4 : us < 100000 ? 5 : 6;
+  s_prof_hist[b]++;
+}
+void profReset() {
+  memset(s_prof_hist, 0, sizeof(s_prof_hist));
+  s_prof_passes = 0; s_prof_rxmax = 0;
+  s_prof_http = ProfCause(); s_prof_nvs = ProfCause(); s_prof_hook = ProfCause();
+  s_late_us = 0;
+}
+uint32_t profPasses()        { return s_prof_passes; }
+uint32_t profHist(int b)     { return s_prof_hist[b]; }
+uint32_t profRxMax()         { return s_prof_rxmax; }
+void profCause(uint8_t w, uint32_t &n, uint32_t &mx, uint32_t &tot) {
+  ProfCause *c = w == 0 ? &s_prof_http : w == 1 ? &s_prof_nvs : &s_prof_hook;
+  n = c->n; mx = c->max_us; tot = (uint32_t)(c->total_us / 1000);
+}
+
 int8_t pinRxBoard() { return s_pin_rxb; }
 int8_t pinTxBoard() { return s_pin_txb; }
 int8_t pinRxPanel() { return s_pin_rxp; }
 int8_t pinTxPanel() { return s_pin_txp; }
 bool wire() { return s_wire; }
+
+// Bridge the pads at the EARLIEST possible moment of boot -- before NVS-heavy
+// init, before the UARTs, long before WiFi. The boot logs recorded two
+// lockouts that happened seconds after power-on: the controller starves while
+// this firmware boots, because until something forwards, the link is dark.
+// Every millisecond shaved here is starvation the controller never sees.
+//
+// Reads only NVS (fast) to respect a saved LISTEN map (tx pins -1 => drive
+// nothing) and the wire preference. openPorts() later hands the TX pads to
+// the UARTs for about a millisecond; wireSet(true) immediately re-bridges.
+void earlyBridge() {
+  Preferences p;
+  p.begin("d8link", true);
+  const int8_t rxb = (int8_t)p.getChar("prxb", PIN_RX_BOARD);
+  const int8_t txb = (int8_t)p.getChar("ptxb", PIN_TX_BOARD);
+  const int8_t txp = (int8_t)p.getChar("ptxp", PIN_TX_PANEL);
+  const int8_t rxp = (int8_t)p.getChar("prxp", PIN_RX_PANEL);
+  const bool   w   = p.getBool("wire", true);
+  p.end();
+  if (!w || rxb < 0 || txb < 0 || txp < 0 || rxp < 0) return;
+  gpio_ll_input_enable(&GPIO, (uint32_t)rxb);
+  gpio_ll_input_enable(&GPIO, (uint32_t)rxp);
+  esp_rom_gpio_connect_in_signal(rxb, SIG_IN_FUNC_97_IDX, false);
+  esp_rom_gpio_connect_out_signal(txp, SIG_IN_FUNC_97_IDX, false, false);
+  esp_rom_gpio_connect_in_signal(rxp, SIG_IN_FUNC_98_IDX, false);
+  esp_rom_gpio_connect_out_signal(txb, SIG_IN_FUNC_98_IDX, false, false);
+  GPIO.func_out_sel_cfg[txp].oen_sel = 1;
+  GPIO.func_out_sel_cfg[txb].oen_sel = 1;
+  GPIO.enable_w1ts.enable_w1ts = (1UL << txp) | (1UL << txb);
+  Serial.println("[link ] early bridge: pads wired before init");
+}
 
 bool wireSet(bool on) {
   if (s_pin_txb < 0 || s_pin_txp < 0) return false;   // LISTEN drives nothing
@@ -2014,7 +2085,9 @@ static void relayTask(void *) {
     uint32_t now = micros();
     uint32_t gap = now - prev;
     if (gap > s_late_us) { s_late_us = gap; s_late_at = millis(); }
+    profGap(gap);
     prev = now;
+    profRx((uint32_t)uBoard.available() + (uint32_t)uPanel.available());
     pump();
     wsrService();     // after pump(): acts on the b0 we have just forwarded
     // 1 Hz trend sampling rides on this task rather than a timer, so it can
@@ -2457,6 +2530,7 @@ void loop() {
   // persistence record, so the flash writes happen in this task, never there.
   const uint8_t want = s_cyc_save;
   if (want) {
+    const uint32_t t0 = micros();
     s_cyc_save = 0;
     if (want == 1) {
       s_prefs.putUChar("cyc_m", s_cyc_save_m);
@@ -2466,6 +2540,7 @@ void loop() {
     } else if (s_prefs.getBool("cyc_on", false)) {
       s_prefs.putBool("cyc_on", false);
     }
+    profNote(1, micros() - t0);
   }
 }
 

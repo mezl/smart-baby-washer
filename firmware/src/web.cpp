@@ -1862,6 +1862,26 @@ void begin() {
       ",\"last\":\"" + String(hook::lastResult()) + "\"}");
   });
 
+  // Relay-path stall profile. ?reset=1 zeroes it.
+  s_server.on("/api/prof", HTTP_GET, []() {
+    if (s_server.hasArg("reset")) cn2::profReset();
+    static const char *BK[7] = {"lt2ms","2_5ms","5_10ms","10_20ms","20_50ms","50_100ms","gt100ms"};
+    String j = "{\"passes\":" + String(cn2::profPasses());
+    for (int b = 0; b < 7; b++)
+      j += ",\"" + String(BK[b]) + "\":" + String(cn2::profHist(b));
+    j += ",\"worst_us\":" + String(cn2::worstGapUs());
+    j += ",\"rx_backlog_max\":" + String(cn2::profRxMax());
+    static const char *CN[3] = {"http","nvs","hook"};
+    for (uint8_t w = 0; w < 3; w++) {
+      uint32_t n, mx, tot; cn2::profCause(w, n, mx, tot);
+      j += ",\"" + String(CN[w]) + "_n\":" + String(n);
+      j += ",\"" + String(CN[w]) + "_max_us\":" + String(mx);
+      j += ",\"" + String(CN[w]) + "_total_ms\":" + String(tot);
+    }
+    j += "}";
+    s_server.send(200, "application/json", j);
+  });
+
   // Byte-perfect on demand. Turning this on strips every rewrite at the emit
   // point, so the E5 mask, the heat ceiling and the cycle runner all stop
   // acting -- it is a diagnostic and a fallback, not an operating mode.
@@ -1962,6 +1982,10 @@ void begin() {
     j += ",\"p1_clr\":" + String(cn2::panelClr());
     j += ",\"locked\":" + String((cn2::statusReal() & 0x40) ? "true" : "false");
     j += ",\"plug\":\"" + String(kasa::plugIp()) + "\"";
+    j += ",\"wire\":" + String(cn2::wire() ? "true" : "false");
+    j += ",\"locked_ms\":" + String(cn2::lockedForMs());
+    j += ",\"link_err\":" + String(cn2::frameBad(0) + cn2::frameBad(1));
+    j += ",\"uptime_s\":" + String(millis() / 1000);
     j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
     if (cn2::pcycleActive()) {
       j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());
@@ -2328,6 +2352,14 @@ void begin() {
   Serial.println("[http ] server on :80");
 }
 
-void loop() { s_server.handleClient(); }
+void loop() {
+  // Timed because handleClient() is suspect #1 for relay stalls: it serves a
+  // whole request synchronously, including multi-KB JSON builds and slow
+  // socket writes to weak-RF clients.
+  const uint32_t t0 = micros();
+  s_server.handleClient();
+  const uint32_t us = micros() - t0;
+  if (us > 300) cn2::profNote(0, us);   // ignore the no-client fast path
+}
 
 }  // namespace web

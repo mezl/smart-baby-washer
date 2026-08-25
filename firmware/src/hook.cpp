@@ -69,7 +69,9 @@ void tick() {
   if (s_last_ms && millis() - s_last_ms < LOCK_HOOK_REPEAT_MS) return;
   s_last_ms = millis() | 1;
   s_fired++;
+  const uint32_t t0 = micros();
   const bool ok = post();
+  cn2::profNote(2, micros() - t0);
   Serial.printf("[hook ] lockout webhook -> %s\n", s_res);
   (void)ok;
 }

@@ -84,6 +84,7 @@ static void armWatchdog() {
 
 void setup() {
   Serial.begin(115200);
+  cn2::earlyBridge();   // machine link first; every ms dark risks a latch
   bootGuard();
   g_boot_ms = millis();
 
