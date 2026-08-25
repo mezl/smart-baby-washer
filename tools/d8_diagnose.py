@@ -102,7 +102,11 @@ try:
     loads(0x10)
     rows = watch(90, "blower")
     fall = max(r[1] for r in rows) - rows[-1][1] if rows else 0
-    R["blower"] = (fall >= 0.5, f"-{fall:.1f} C in 90 s")
+    # Field-tested 2026-08-25: right after the heat phase the heater plate's
+    # residual heat masks sump cooling entirely (fan audibly running, sump
+    # -0.0 C). There is no fair sensor proxy for the blower, so it is a
+    # CHECK item like the wash pump; the cooling number rides along as info.
+    R["blower"] = (None, f"commanded ok — confirm fan by ear (sump {-fall:+.1f} C info only)")
 
     print("[6/6] air heat + blower (0x18) 20 s — feel warm air at the vent; then final drain")
     loads(0x18); watch(20, "air heat")
