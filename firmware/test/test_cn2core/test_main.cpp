@@ -398,126 +398,17 @@ void test_thinned_stream_emits_whole_frames(void) {
 // A flush frame: intake commanded, fill target 0xFF. Anything else is not.
 static const uint8_t FLUSH_B1 = cn2core::LOAD_DRAIN | cn2core::LOAD_INTAKE; // 0x22
 
-static void test_flushcap_ignores_a_targeted_fill(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  // 0x20 with a real target is an ordinary metered fill and must never be
-  // capped -- the controller ends those itself on the flow count.
-  for (uint32_t t = 0; t < 10000; t += 200)
-    TEST_ASSERT_FALSE(f.frame(cn2core::LOAD_INTAKE, 0x20, t));
-  TEST_ASSERT_FALSE(f.on);
-  TEST_ASSERT_FALSE(f.hold);
-  TEST_ASSERT_EQUAL_UINT32(0, f.fired);
-}
 
-static void test_flushcap_ignores_a_drain_without_intake(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  for (uint32_t t = 0; t < 10000; t += 200)
-    TEST_ASSERT_FALSE(f.frame(cn2core::LOAD_DRAIN, 0xFF, t));
-  TEST_ASSERT_FALSE(f.on);
-}
 
-static void test_flushcap_fires_once_at_the_cap(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  uint32_t trips = 0;
-  for (uint32_t t = 0; t <= 3000; t += 200)
-    if (f.frame(FLUSH_B1, 0xFF, t)) trips++;
-  TEST_ASSERT_EQUAL_UINT32(1, trips);        // exactly one log line
-  TEST_ASSERT_EQUAL_UINT32(1, f.fired);
-  TEST_ASSERT_TRUE(f.hold);
-  TEST_ASSERT_TRUE(f.on);
-}
 
-static void test_flushcap_does_not_fire_early(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  for (uint32_t t = 0; t < 1000; t += 200)
-    TEST_ASSERT_FALSE(f.frame(FLUSH_B1, 0xFF, t));
-  TEST_ASSERT_FALSE(f.hold);
-  TEST_ASSERT_TRUE(f.frame(FLUSH_B1, 0xFF, 1000));   // exactly at the cap
-}
 
-static void test_flushcap_strips_intake_and_keeps_the_drain(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  TEST_ASSERT_EQUAL_HEX8(FLUSH_B1, f.apply(FLUSH_B1));   // before the cap
-  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(FLUSH_B1, 0xFF, t);
-  // This is the whole point: the drain keeps running, so the sump empties and
-  // the controller ends the stage the way it always has.
-  TEST_ASSERT_EQUAL_HEX8(cn2core::LOAD_DRAIN, f.apply(FLUSH_B1));
-}
 
-static void test_flushcap_stays_latched_on_its_own_output(void) {
-  // The trap this struct exists to avoid: fed the POST-cap byte, the trigger
-  // condition reads false, the state clears, the intake bit comes back, and the
-  // pair oscillates at the frame rate. b1_want must be the pre-cap value.
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(FLUSH_B1, 0xFF, t);
-  TEST_ASSERT_TRUE(f.hold);
-  for (uint32_t t = 1200; t <= 5000; t += 200) f.frame(FLUSH_B1, 0xFF, t);
-  TEST_ASSERT_TRUE(f.hold);                 // still held, never re-armed
-  TEST_ASSERT_EQUAL_UINT32(1, f.fired);     // and only counted once
-}
 
-static void test_flushcap_survives_one_dropped_frame(void) {
-  // One non-flush frame mid-flush must NOT restart the clock. That is the one
-  // error that would make the cap useless in exactly the case it exists for.
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  f.frame(FLUSH_B1, 0xFF, 0);
-  f.frame(FLUSH_B1, 0xFF, 200);
-  f.frame(0x00, 0x00, 400);                 // one bad/idle frame
-  TEST_ASSERT_TRUE(f.on);                   // still counting
-  f.frame(FLUSH_B1, 0xFF, 600);
-  TEST_ASSERT_TRUE(f.frame(FLUSH_B1, 0xFF, 1000));   // capped on the original t0
-}
 
-static void test_flushcap_releases_after_two_clear_frames(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(FLUSH_B1, 0xFF, t);
-  TEST_ASSERT_TRUE(f.hold);
-  f.frame(0x00, 0x00, 1200);
-  TEST_ASSERT_TRUE(f.on);                   // one is not enough
-  f.frame(0x00, 0x00, 1400);
-  TEST_ASSERT_FALSE(f.on);
-  TEST_ASSERT_FALSE(f.hold);
-  TEST_ASSERT_EQUAL_HEX8(FLUSH_B1, f.apply(FLUSH_B1));
-}
 
-static void test_flushcap_rearms_for_the_next_flush(void) {
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  for (uint32_t t = 0; t <= 1000; t += 200) f.frame(FLUSH_B1, 0xFF, t);
-  f.frame(0x00, 0x00, 1200); f.frame(0x00, 0x00, 1400);
-  uint32_t trips = 0;
-  for (uint32_t t = 2000; t <= 3200; t += 200)
-    if (f.frame(FLUSH_B1, 0xFF, t)) trips++;
-  TEST_ASSERT_EQUAL_UINT32(1, trips);
-  TEST_ASSERT_EQUAL_UINT32(2, f.fired);
-}
 
-static void test_flushcap_zero_disables(void) {
-  cn2core::FlushCap f; f.cap_ms = 0;
-  for (uint32_t t = 0; t <= 600000; t += 1000) f.frame(FLUSH_B1, 0xFF, t);
-  TEST_ASSERT_TRUE(f.on);                   // still tracked, for the UI
-  TEST_ASSERT_FALSE(f.hold);                // but never acted on
-  TEST_ASSERT_EQUAL_UINT32(0, f.fired);
-  TEST_ASSERT_EQUAL_HEX8(FLUSH_B1, f.apply(FLUSH_B1));
-}
 
-static void test_flushcap_survives_millis_rollover(void) {
-  // millis() wraps every 49.7 days and the machine is expected to sit powered.
-  cn2core::FlushCap f; f.cap_ms = 1000;
-  const uint32_t t0 = 0xFFFFFF00u;          // 256 ms before the wrap
-  f.frame(FLUSH_B1, 0xFF, t0);
-  TEST_ASSERT_FALSE(f.hold);
-  TEST_ASSERT_TRUE(f.frame(FLUSH_B1, 0xFF, (uint32_t)(t0 + 1000)));   // wrapped
-}
 
-static void test_flushcap_default_clears_a_real_flush(void) {
-  // The longest flush ever measured on this machine is 114.6 s (Self-Clean),
-  // and the cycle runner's own longest is 116 s. The 180 s default must not
-  // truncate either.
-  cn2core::FlushCap f; f.cap_ms = 180000;
-  for (uint32_t t = 0; t <= 116000; t += 200)
-    TEST_ASSERT_FALSE(f.frame(FLUSH_B1, 0xFF, t));
-  TEST_ASSERT_FALSE(f.hold);
-}
 
 
 // ---------------------------------------------------------------------------
@@ -1102,83 +993,13 @@ static void test_heatceiling_ignores_frames_with_no_heater(void) {
 // ---------------------------------------------------------------------------
 // Measured on a real install: a 90-count charge needs 160 s to clear a
 // restricted line against a 28 s drain stage.
-static void test_drainextend_triggers_on_the_falling_edge(void) {
-  cn2core::DrainExtend d; d.extra_ms = 132000;
-  TEST_ASSERT_FALSE(d.frame(0x02, 0));           // draining, not yet finished
-  TEST_ASSERT_FALSE(d.frame(0x02, 5000));
-  TEST_ASSERT_TRUE (d.frame(0x00, 28000));       // panel let go -> extend
-  TEST_ASSERT_TRUE(d.active);
-  TEST_ASSERT_EQUAL_UINT32(1, d.runs);
-}
 
-static void test_drainextend_holds_drain_and_blocks_intake(void) {
-  // This is the whole mechanism: the panel's fill ends on flow COUNT, and with
-  // intake stripped the count cannot advance, so the panel waits.
-  cn2core::DrainExtend d; d.extra_ms = 132000;
-  d.frame(0x02, 0); d.frame(0x00, 28000);
-  TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x20));   // fill commanded -> drain only
-  TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x00));
-  TEST_ASSERT_EQUAL_HEX8(0x03, d.apply(0x01));   // wash pump passes through
-}
 
-static void test_drainextend_ends_on_time_and_releases_intake(void) {
-  cn2core::DrainExtend d; d.extra_ms = 10000;
-  d.frame(0x02, 0); d.frame(0x00, 1000);
-  for (uint32_t t = 1000; t < 11000; t += 200) {
-    d.frame(0x20, t);
-    if (d.active) TEST_ASSERT_EQUAL_HEX8(0x02, d.apply(0x20));
-  }
-  d.frame(0x20, 11200);
-  TEST_ASSERT_FALSE(d.active);
-  TEST_ASSERT_EQUAL_HEX8(0x20, d.apply(0x20));   // intake flows again
-}
 
-static void test_drainextend_never_extends_into_a_heater(void) {
-  // Draining while heating is the one combination this must never create.
-  cn2core::DrainExtend d; d.extra_ms = 132000;
-  d.frame(0x02, 0); d.frame(0x00, 28000);
-  TEST_ASSERT_TRUE(d.active);
-  d.frame(0x05, 29000);                          // wash + water heat
-  TEST_ASSERT_FALSE_MESSAGE(d.active, "extended into a heater stage");
-  TEST_ASSERT_EQUAL_HEX8(0x05, d.apply(0x05));
-}
 
-static void test_drainextend_does_not_start_if_heat_follows_the_drain(void) {
-  cn2core::DrainExtend d; d.extra_ms = 132000;
-  d.frame(0x02, 0);
-  TEST_ASSERT_FALSE(d.frame(0x04, 28000));       // steam straight after a drain
-  TEST_ASSERT_FALSE(d.active);
-}
 
-static void test_drainextend_zero_disables(void) {
-  cn2core::DrainExtend d; d.extra_ms = 0;
-  d.frame(0x02, 0);
-  TEST_ASSERT_FALSE(d.frame(0x00, 28000));
-  TEST_ASSERT_FALSE(d.active);
-  TEST_ASSERT_EQUAL_HEX8(0x20, d.apply(0x20));
-}
 
-static void test_drainextend_rearms_for_every_drain(void) {
-  // A wash has many drains; each one must get its extension.
-  cn2core::DrainExtend d; d.extra_ms = 1000;
-  uint32_t t = 0;
-  for (int i = 0; i < 5; i++) {
-    d.frame(0x02, t); t += 500;
-    d.frame(0x00, t); t += 1200;
-    d.frame(0x20, t); t += 500;
-  }
-  TEST_ASSERT_EQUAL_UINT32(5, d.runs);
-}
 
-static void test_drainextend_survives_millis_rollover(void) {
-  cn2core::DrainExtend d; d.extra_ms = 1000;
-  const uint32_t t0 = 0xFFFFFF00u;
-  d.frame(0x02, t0);
-  d.frame(0x00, (uint32_t)(t0 + 100));
-  TEST_ASSERT_TRUE(d.active);
-  d.frame(0x20, (uint32_t)(t0 + 1200));
-  TEST_ASSERT_FALSE(d.active);
-}
 
 
 // ---------------------------------------------------------------------------
@@ -1329,15 +1150,6 @@ int main(int, char **) {
   RUN_TEST(test_stuck_rearms_if_the_panel_wakes_mid_dwell);
   RUN_TEST(test_stuck_zero_disables);
 
-  RUN_TEST(test_drainextend_triggers_on_the_falling_edge);
-  RUN_TEST(test_drainextend_holds_drain_and_blocks_intake);
-  RUN_TEST(test_drainextend_ends_on_time_and_releases_intake);
-  RUN_TEST(test_drainextend_never_extends_into_a_heater);
-  RUN_TEST(test_drainextend_does_not_start_if_heat_follows_the_drain);
-  RUN_TEST(test_drainextend_zero_disables);
-  RUN_TEST(test_drainextend_rearms_for_every_drain);
-  RUN_TEST(test_drainextend_survives_millis_rollover);
-
   RUN_TEST(test_heatceiling_allows_the_captured_steam_phase);
   RUN_TEST(test_heatceiling_cuts_only_the_heater_bits);
   RUN_TEST(test_heatceiling_fires_once_and_holds);
@@ -1353,19 +1165,6 @@ int main(int, char **) {
   RUN_TEST(test_fillstall_stays_cut_on_its_own_output);
   RUN_TEST(test_fillstall_zero_disables);
   RUN_TEST(test_fillstall_survives_millis_rollover);
-
-  RUN_TEST(test_flushcap_ignores_a_targeted_fill);
-  RUN_TEST(test_flushcap_ignores_a_drain_without_intake);
-  RUN_TEST(test_flushcap_fires_once_at_the_cap);
-  RUN_TEST(test_flushcap_does_not_fire_early);
-  RUN_TEST(test_flushcap_strips_intake_and_keeps_the_drain);
-  RUN_TEST(test_flushcap_stays_latched_on_its_own_output);
-  RUN_TEST(test_flushcap_survives_one_dropped_frame);
-  RUN_TEST(test_flushcap_releases_after_two_clear_frames);
-  RUN_TEST(test_flushcap_rearms_for_the_next_flush);
-  RUN_TEST(test_flushcap_zero_disables);
-  RUN_TEST(test_flushcap_survives_millis_rollover);
-  RUN_TEST(test_flushcap_default_clears_a_real_flush);
 
   RUN_TEST(test_txq_holds_a_ctrl_frame_until_complete);
   RUN_TEST(test_txq_panel_frame_is_five_bytes);

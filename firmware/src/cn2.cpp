@@ -126,12 +126,8 @@ static uint8_t  s_panel_b1_want = 0;
 // rather than the one the panel asked for.
 static uint8_t  s_panel_b3_fwd = 0;
 // ---- untargeted-flush cap (see FLUSH_CAP_MS_DEFAULT in config.h) ----------
-// The decision lives in cn2core::FlushCap so it is exercised on the host; this
-// is only the wiring.
-static cn2core::FlushCap s_fcap;
 static cn2core::FillStall s_fstall;   // panel-run fill guard; see cn2core
 static cn2core::HeatCeiling s_heat;   // panel-run heater backstop
-static cn2core::DrainExtend s_dext;   // panel-run drain extension
 static cn2core::StuckLoad   s_stuck;  // mains cut-out; see cn2core::StuckLoad
 static uint16_t s_stuck_off_s = 30;
 static uint8_t  s_e5f_mode = E5F_AUTO;   // false-E5 filter; see e5FilterActive()
@@ -450,7 +446,11 @@ bool wireSet(bool on) {
     esp_rom_gpio_connect_out_signal(s_pin_txp, U1TXD_OUT_IDX, false, false);  // uPanel = Serial1
   }
   s_wire = on;
-  s_prefs.putBool("wire", on);
+  // A LOCAL handle, deliberately. Several setters do s_prefs.begin()/end()
+  // on the shared handle, and after any of them runs, writes through s_prefs
+  // fail silently -- which is how "wire off" kept un-persisting across
+  // reboots and the board came up bridged against Kai's standing directive.
+  { Preferences p; p.begin("d8link", false); p.putBool("wire", on); p.end(); }
   Serial.printf("[link ] %s\n", on ? "WIRE: pads bridged in the GPIO matrix"
                                     : "CPU relay: UARTs own the TX pads");
   return true;
@@ -517,10 +517,8 @@ void begin() {
   s_wsr_low  = s_prefs.getBool("wsrl", WS_RELAY_ACTIVE_LOW != 0);
   s_wsr_mode = s_prefs.getUChar("wsrm", WSR_AUTO);
   if (s_wsr_mode > WSR_AUTO) s_wsr_mode = WSR_AUTO;
-  s_fcap.cap_ms    = s_prefs.getULong("fcap", FLUSH_CAP_MS_DEFAULT);
   s_fstall.stall_ms = s_prefs.getULong("fstall", FILL_STALL_MS_DEFAULT);
   s_heat.ceiling_c  = s_prefs.getUChar("hceil", HEAT_CEILING_C);
-  s_dext.extra_ms   = s_prefs.getULong("dext", DRAIN_EXTRA_MS_DEFAULT);
   s_stuck.dwell_ms  = s_prefs.getULong("stkms", STUCK_DWELL_MS_DEFAULT);
   s_stuck.hot_c     = s_prefs.getUChar("stkc", STUCK_HOT_C);
   s_stuck_off_s     = (uint16_t)s_prefs.getUShort("stkoff", STUCK_OFF_S);
@@ -534,8 +532,6 @@ void begin() {
   wsrIdlePin(s_wsr_pin);
   Serial.printf("[wsr  ] wash-pump relay on GPIO%d, active-%s, mode %u\n",
                 (int)s_wsr_pin, s_wsr_low ? "LOW" : "HIGH", s_wsr_mode);
-  Serial.printf("[flush] untargeted-flush cap %lu ms%s\n",
-                (unsigned long)s_fcap.cap_ms, s_fcap.cap_ms ? "" : "  (DISABLED)");
   // How long the panel was starved across the last update, reboot included.
   if (s_ota_magic == OTA_MAGIC) {
     s_ota_magic = 0;
@@ -550,7 +546,15 @@ void begin() {
   // Wire is the boot DEFAULT (NVS-overridable): the machine's link comes up
   // as silicon before WiFi is even started, so nothing this firmware does --
   // boot, OTA, HTTP, a crash -- can starve the controller of panel frames.
-  if (s_prefs.getBool("wire", true)) wireSet(true);
+  // Read through a LOCAL handle. The shared s_prefs read returned the
+  // default (true) here even when NVS held false -- and because wireSet(true)
+  // PERSISTS what it applies, every boot then overwrote the stored false and
+  // the board kept coming up bridged against the standing directive. The
+  // local handle reads the flash truthfully (verified: stored:false survives
+  // until this line, and is true again right after boot).
+  bool wire_pref;
+  { Preferences p; p.begin("d8link", true); wire_pref = p.getBool("wire", true); p.end(); }
+  if (wire_pref) wireSet(true);
   if (!s_task) {
     xTaskCreate(relayTask, "cn2relay", 3072, nullptr, 10, &s_task);
     Serial.println("[cn2  ] relay task started (priority 10)");
@@ -939,10 +943,8 @@ static void pump() {
     // neither is a reason to let it.
     if (s_pb_i == 1) {
       s_panel_b1_want = out;
-      out = s_fcap.apply(out);                  // drop intake, leave drain
       out = s_fstall.apply(out);                // ...and if water never came
       out = s_heat.apply(out);                  // ...and above the heat ceiling
-      out = s_dext.apply(out);                  // hold drain / hold off intake
       s_panel_b1_fwd = out;
     }
     if (s_pb_i == 3) s_panel_b3_fwd = out;
@@ -1773,16 +1775,22 @@ void cycleStart() {
   Serial.println("[cycle] started");
 }
 
+// Called by resumeTick() after a power cycle (see the gates there), or
+// explicitly via POST /api/cycle_recover.
 bool cycleRecover() {
   if (s_cyc_state == ST_RUN || s_cyc_state == ST_PAUSE) return false;
-  if (!s_prefs.getBool("cyc_on", false)) return false;
-  const uint8_t m = s_prefs.getUChar("cyc_m", 0);
-  const uint8_t i = s_prefs.getUChar("cyc_i", 0);
+  Preferences p; p.begin("d8link", true);
+  const bool on = p.getBool("cyc_on", false);
+  const uint8_t m = p.getUChar("cyc_m", 0);
+  const uint8_t i = p.getUChar("cyc_i", 0);
+  const bool w_ = p.getBool("cyc_w", false);
+  p.end();
+  if (!on) return false;
   if (m >= PROG_N) { cycPersistClear(); return false; }
   cycleSetMode(m);
   if (i >= STG_N)  { cycPersistClear(); return false; }
   s_cyc_i = i; s_cyc_t0 = millis();
-  s_cyc_water = s_prefs.getBool("cyc_w", false);
+  s_cyc_water = w_;
   s_cyc_flow_ms = millis(); s_cyc_flow_prev = 0; s_cyc_flow_max = 0;
   s_cyc_why[0] = 0; s_cyc_state = ST_RUN;
   cycApply(STG[i]);
@@ -2327,23 +2335,13 @@ static void wsrPanelFrame() {
   if (++s_wsr_run >= 2) { s_wsr_b0 = b0; s_wsr_run = 0; }
 }
 
-// The flush cap, evaluated once per checksum-valid panel frame.
-//
-// Runs off the PRE-CAP byte 1 and the forwarded byte 3, so it stays latched
-// once it fires. Releasing needs two consecutive non-flush frames: a single
-// dropped frame must not silently restart the clock, because that is the one
-// error that would make the cap useless exactly when it is needed.
-static uint32_t s_fcap_okprev = 0;
-static bool     s_fcap_wason   = false;
+// The safety guards, evaluated once per checksum-valid panel frame.
+static uint32_t s_guard_okprev = 0;
 
 static void flushFrame() {
-  const bool valid = (s_asm[1].ok != s_fcap_okprev);
-  s_fcap_okprev = s_asm[1].ok;
+  const bool valid = (s_asm[1].ok != s_guard_okprev);
+  s_guard_okprev = s_asm[1].ok;
   if (!valid) return;                     // a bad frame proves nothing
-
-  if (s_dext.frame(s_panel_b1_want, millis()))
-    Serial.printf("[drain] extending by %lu s — intake held off so the panel "
-                  "waits at its fill\n", (unsigned long)(s_dext.extra_ms / 1000));
 
   if (s_heat.frame(s_panel_b1_want, (uint8_t)(s_temp_real & 0x7F)))
     Serial.printf("[heat ] %u C >= ceiling %u — heater bits stripped until %u C\n",
@@ -2357,27 +2355,6 @@ static void flushFrame() {
                   "released. Check the tank, then the flow meter.\n",
                   (unsigned long)(s_fstall.stall_ms / 1000));
 
-  const bool tripped = s_fcap.frame(s_panel_b1_want, s_panel_b3_fwd, millis());
-  if (tripped)
-    // Not an abort. The drain keeps running, so the sump empties and the
-    // controller ends the stage the way it always has.
-    Serial.printf("[flush] CAP at %lu ms -- intake released, drain left on\n",
-                  (unsigned long)s_fcap.cap_ms);
-  else if (s_fcap.on && !s_fcap_wason)
-    Serial.println("[flush] untargeted flush started");
-  else if (!s_fcap.on && s_fcap_wason)
-    Serial.println("[flush] flush released");
-  s_fcap_wason = s_fcap.on;
-}
-
-void setFlushCap(uint32_t ms) {
-  s_fcap.cap_ms = ms;
-  s_fcap.hold   = false;                  // a new cap rearms an active flush
-  s_prefs.begin("d8link", false);
-  s_prefs.putULong("fcap", ms);
-  s_prefs.end();
-  Serial.printf("[flush] cap = %lu ms%s\n", (unsigned long)ms,
-                ms ? "" : "  (DISABLED)");
 }
 uint32_t wifiDelayMs() { return s_wifi_delay; }
 void setWifiDelayMs(uint32_t ms) {
@@ -2418,18 +2395,6 @@ uint16_t stuckOffS()   { return s_stuck_off_s; }
 uint32_t stuckFires()  { return s_stuck.fires; }
 bool     stuckArmed()  { return s_stuck.armed; }
 
-void setDrainExtra(uint32_t ms) {
-  if (ms > 600000UL) ms = 600000UL;
-  s_dext.extra_ms = ms; s_dext.active = false;
-  s_prefs.begin("d8link", false); s_prefs.putULong("dext", ms); s_prefs.end();
-  Serial.printf("[drain] extension = %lu ms%s\n", (unsigned long)ms,
-                ms ? "" : " (DISABLED)");
-}
-uint32_t drainExtraMs()  { return s_dext.extra_ms; }
-bool     drainExtending(){ return s_dext.active; }
-uint32_t drainExtendRemainMs() { return s_dext.remainMs(millis()); }
-uint32_t drainExtendRuns(){ return s_dext.runs; }
-
 void setHeatCeiling(uint8_t c) {
   s_heat.ceiling_c = c; s_heat.cut = false;
   s_prefs.begin("d8link", false); s_prefs.putUChar("hceil", c); s_prefs.end();
@@ -2442,12 +2407,6 @@ uint32_t heatCeilingCuts(){ return s_heat.cuts; }
 uint32_t fillStallMs()  { return s_fstall.stall_ms; }
 bool     fillStallCut() { return s_fstall.cut; }
 uint32_t fillStallCuts(){ return s_fstall.cuts; }
-
-uint32_t flushCapMs()  { return s_fcap.cap_ms; }
-bool     flushActive() { return s_fcap.on; }
-uint32_t flushMs()     { return s_fcap.on ? (millis() - s_fcap.since) : 0; }
-bool     flushCapped() { return s_fcap.hold; }
-uint32_t flushCaps()   { return s_fcap.fired; }
 
 // Called at ~1 kHz from relayTask.
 static void wsrService() {
@@ -2534,21 +2493,50 @@ String lastFrameHex(uint8_t side) {
 }
 void     resetGap()   { s_late_us = 0; }
 
+// Self-contained cycle resume after a power cycle. The lockout latch is only
+// cleared by a mains cut, the ESP32 dies with that cut (it is powered by the
+// same plug), and no external daemon exists any more to call /api/cycle_recover
+// afterwards -- the board must decide alone. The gates make a stale or
+// malicious resume impossible to reach by accident:
+//   - the NVS record only exists while a cycle was genuinely mid-run
+//   - the link must be settled (ok_c) and the controller CLEAR
+//   - the panel must be idle -- a human running the machine wins instantly
+//   - 20 s of stable uptime, so a crash-looping board never pumps water
+//   - one-shot: the flag is consumed BEFORE the resume is applied
+static bool s_resume_done = false;
+static void resumeTick() {
+  if (s_resume_done || millis() < 20000) return;
+  if (s_cyc_state != ST_IDLE) { s_resume_done = true; return; }
+  bool armed; { Preferences p; p.begin("d8link", true); armed = p.getBool("cyc_on", false); p.end(); }
+  if (!armed) { s_resume_done = true; return; }
+  if (s_asm[0].ok < 50 || (s_st_real & 0x40) || s_panel_b1 != 0) return;
+  s_resume_done = true;
+  if (cycleRecover())
+    Serial.println("[cycle] auto-resumed after power cycle (self-contained)");
+}
+
 void loop() {
+  resumeTick();
   // Forwarding runs in relayTask(); the only work here is flushing the cycle
   // persistence record, so the flash writes happen in this task, never there.
   const uint8_t want = s_cyc_save;
   if (want) {
     const uint32_t t0 = micros();
     s_cyc_save = 0;
+    // Local handle for the same reason as wireSet(): the shared s_prefs can
+    // have been closed by any setter's begin()/end() pair, and a cycle whose
+    // progress silently fails to persist is a cycle that cannot survive a
+    // recovery power cycle.
+    Preferences p; p.begin("d8link", false);
     if (want == 1) {
-      s_prefs.putUChar("cyc_m", s_cyc_save_m);
-      s_prefs.putUChar("cyc_i", s_cyc_save_i);
-      s_prefs.putBool("cyc_w", s_cyc_save_w);
-      s_prefs.putBool("cyc_on", true);
-    } else if (s_prefs.getBool("cyc_on", false)) {
-      s_prefs.putBool("cyc_on", false);
+      p.putUChar("cyc_m", s_cyc_save_m);
+      p.putUChar("cyc_i", s_cyc_save_i);
+      p.putBool("cyc_w", s_cyc_save_w);
+      p.putBool("cyc_on", true);
+    } else if (p.getBool("cyc_on", false)) {
+      p.putBool("cyc_on", false);
     }
+    p.end();
     profNote(1, micros() - t0);
   }
 }

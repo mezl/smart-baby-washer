@@ -11,8 +11,8 @@
 #include <cn2core.h>
 
 #include "cn2.h"
+#include <Preferences.h>
 #include "kasa.h"
-#include "hook.h"
 #include "hal/gpio_ll.h"
 #include "soc/gpio_struct.h"
 #include "net.h"
@@ -497,16 +497,6 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
     <div class=lbl style="margin-top:1px" title="byte3 sets how much water the next fill draws. It does NOT start a cycle — forcing 40/20 was tried and the machine ignored it.">fill volume, not a cycle trigger</div>
     <div style="margin-top:3px" id=tgtbtn></div>
     <div class=lbl id=tgtnote style="margin-top:2px"></div>
-    <div style="margin-top:7px">
-      <b style="color:#9cf;font-size:11px;letter-spacing:.06em">FLUSH CAP</b>
-      <span id=fcapst class=lbl></span></div>
-    <div class=lbl style="margin-top:1px" title="A 0xFF flush is drain and intake together with no volume target, and neither end times it out -- it ends when the water stops arriving, i.e. when the hand-filled tank runs dry. Same Self-Clean program measured 64.1 s once and 114.6 s another time. On a machine fed from a float valve or any always-on supply nothing ends it, so this does: after the cap the INTAKE bit is stripped from the forwarded byte 1 and the DRAIN bit is left set, which reproduces the event the controller already terminates on.">strips intake, leaves the drain on &mdash; hover</div>
-    <div style="margin-top:3px">
-      <button class=sm onclick="fcap(180000)">180 s</button>
-      <button class=sm onclick="fcap(120000)">120 s</button>
-      <input id=fcs size=3 value=180 class=mono title="seconds">
-      <button class=sm onclick="fcap($('fcs').value*1000)">set</button>
-      <button class=sm onclick="fcap(0)" title="Only safe on a hand-filled tank, which bounds the flush by running dry.">off</button></div>
     <div class=lbl style="margin-top:3px">raw hex
       byte2 <input id=m2 size=2 value=D6 class=mono title="Determined by byte 3 in every frame ever captured. Sending an unpaired value is a state the machine has never produced — fine for probing, not for imitating it.">
       byte3 <input id=m3 size=2 value=23 class=mono title="the fill target">
@@ -1064,7 +1054,6 @@ function cycUpd(c){
   });
 }
 function e5f(m){post('/api/e5filter?mode='+m)}
-function fcap(ms){post('/api/flushcap?ms='+(ms|0))}
 function povr(c,v){post('/api/panel_ovr?clr='+c+'&set='+v)}
 function modeo(a,b){post('/api/mode_ovr?b2='+a+'&b3='+b)}
 
@@ -1143,7 +1132,7 @@ function b1tbl(s){
   // know nothing about -- the table claimed intake was being forwarded while it
   // was being held down.
   const fv=(s.pb1_fwd&m)?1:0;
-  const capped=(k===5&&s.flush_cap&&(((s.pb1&~s.p1_clr)|s.p1_set)&m));
+  const capped=false;
   const st=(s.p1_set&m)?'on':((s.p1_clr&m)?'off':'pass');
   h+=`<tr><td class="mono nw">b${k}</td><td class="mono nw">${h2(m)}</td>`+
      `<td class="mono c">${pv}</td>`+
@@ -1318,15 +1307,6 @@ async function tick(){
       +'shut the intake motor has nothing to stop it &mdash; watch the machine.</span>'
     : 'steam 20 &middot; rinse 80 &middot; wash 90 &middot; clean 100 counts &middot; '
       +'flush = no target';
-  $('fcapst').innerHTML = s.flush_cap
-    ? '<span class=bad>&#9679; CAPPED &mdash; intake held down, drain still on</span>'
-    : s.flush_on
-    ? '<span class=warn>&#9679; flushing '+(s.flush_ms/1000).toFixed(0)+' s'
-      +(s.fcap_ms?' of '+(s.fcap_ms/1000).toFixed(0)+' s':'')+'</span>'
-    : s.fcap_ms
-    ? '<span class=mut>'+(s.fcap_ms/1000).toFixed(0)+' s'
-      +(s.flush_n?' &middot; fired '+s.flush_n+'x':'')+'</span>'
-    : '<span class=bad>&#9679; DISABLED &mdash; only the tank bounds a flush</span>';
   $('fb').innerHTML=frameHTML(s.fb,true);
   $('fp').innerHTML=frameHTML(s.fp,false);
   if(!$('fbleg').innerHTML){ $('fbleg').innerHTML=frameLegend(true);
@@ -1475,7 +1455,6 @@ static String statusJson() {
   j += ",\"wire\":" + String(cn2::wire() ? "true" : "false");
   j += ",\"pure\":" + String(cn2::pure() ? "true" : "false");
   j += ",\"locked_ms\":" + String(cn2::lockedForMs());
-  j += ",\"hook_fired\":" + String(hook::fired());
   j += ",\"edit_c\":" + String(cn2::editC());
   j += ",\"edit_p\":" + String(cn2::editP());
   j += ",\"worst_gap_us\":" + String(cn2::worstGapUs());
@@ -1517,21 +1496,12 @@ static String statusJson() {
   j += ",\"stuck_off\":" + String(cn2::stuckOffS());
   j += ",\"stuck_armed\":" + String(cn2::stuckArmed() ? "true" : "false");
   j += ",\"stuck_fires\":" + String(cn2::stuckFires());
-  j += ",\"dext_ms\":" + String(cn2::drainExtraMs());
-  j += ",\"dext_on\":" + String(cn2::drainExtending() ? "true" : "false");
-  j += ",\"dext_left\":" + String(cn2::drainExtendRemainMs());
-  j += ",\"dext_runs\":" + String(cn2::drainExtendRuns());
   j += ",\"hceil_c\":" + String(cn2::heatCeilingC());
   j += ",\"hceil_cut\":" + String(cn2::heatCeilingCut() ? "true" : "false");
   j += ",\"hceil_n\":" + String(cn2::heatCeilingCuts());
   j += ",\"fstall_ms\":" + String(cn2::fillStallMs());
   j += ",\"fstall_cut\":" + String(cn2::fillStallCut() ? "true" : "false");
   j += ",\"fstall_n\":" + String(cn2::fillStallCuts());
-  j += ",\"fcap_ms\":" + String(cn2::flushCapMs());
-  j += ",\"flush_on\":" + String(cn2::flushActive() ? "true" : "false");
-  j += ",\"flush_ms\":" + String(cn2::flushMs());
-  j += ",\"flush_cap\":" + String(cn2::flushCapped() ? "true" : "false");
-  j += ",\"flush_n\":" + String(cn2::flushCaps());
   j += ",\"wsr_low\":" + String(cn2::wsRelayActiveLow() ? "true" : "false");
   j += ",\"virtual\":" + String(cn2::virtualOn() ? "true" : "false");
   j += ",\"virt_n\":" + String(cn2::virtualCount());
@@ -1736,15 +1706,6 @@ void begin() {
       ",\"fires\":" + String(cn2::stuckFires()) + "}");
   });
 
-  //   POST /api/drainextra?ms=132000   (0 disables)
-  s_server.on("/api/drainextra", HTTP_POST, []() {
-    if (s_server.hasArg("ms")) cn2::setDrainExtra(s_server.arg("ms").toInt());
-    s_server.send(200, "application/json",
-      "{\"ok\":true,\"ms\":" + String(cn2::drainExtraMs()) +
-      ",\"active\":" + String(cn2::drainExtending() ? "true" : "false") +
-      ",\"runs\":" + String(cn2::drainExtendRuns()) + "}");
-  });
-
   //   POST /api/heatceiling?c=105      (0 disables)
   s_server.on("/api/heatceiling", HTTP_POST, []() {
     if (s_server.hasArg("c")) cn2::setHeatCeiling((uint8_t)s_server.arg("c").toInt());
@@ -1763,19 +1724,10 @@ void begin() {
       ",\"cuts\":" + String(cn2::fillStallCuts()) + "}");
   });
 
-  //   POST /api/flushcap?ms=180000     (0 disables)
   //
   // Bounds the untargeted cool-down flush. Nothing at either end of the link
   // times one out -- it ends when the water stops arriving, which is the tank
   // running dry. On a machine fed from an always-on supply that never happens.
-  s_server.on("/api/flushcap", HTTP_POST, []() {
-    if (s_server.hasArg("ms")) cn2::setFlushCap(s_server.arg("ms").toInt());
-    s_server.send(200, "application/json",
-      "{\"ok\":true,\"ms\":" + String(cn2::flushCapMs()) +
-      ",\"active\":" + String(cn2::flushActive() ? "true" : "false") +
-      ",\"capped\":" + String(cn2::flushCapped() ? "true" : "false") + "}");
-  });
-
   //   POST /api/wifidelay?ms=60000    (0 = normal)
   s_server.on("/api/wifidelay", HTTP_POST, []() {
     if (s_server.hasArg("ms")) cn2::setWifiDelayMs(s_server.arg("ms").toInt());
@@ -1834,6 +1786,16 @@ void begin() {
 
   // WIRE mode: pad-to-pad bridge in the GPIO matrix. The default. Sniffing
   // continues; every rewrite feature goes dormant until this is turned off.
+  // GET returns live state AND the stored boot preference -- added while
+  // debugging a persist failure; cheap enough to keep.
+  s_server.on("/api/wire", HTTP_GET, []() {
+    Preferences p; p.begin("d8link", true);
+    const bool stored = p.getBool("wire", true);
+    p.end();
+    s_server.send(200, "application/json",
+      String("{\"wire\":") + (cn2::wire() ? "true" : "false") +
+      ",\"stored\":" + (stored ? "true" : "false") + "}");
+  });
   s_server.on("/api/wire", HTTP_POST, []() {
     bool ok = true;
     if (s_server.hasArg("on")) ok = cn2::wireSet(s_server.arg("on").toInt() != 0);
@@ -1853,15 +1815,6 @@ void begin() {
       ",\"stage\":" + String(cn2::cycleStage()) + "}");
   });
 
-  // Where the lockout webhook points (an HA webhook URL). Empty disables.
-  s_server.on("/api/hook", HTTP_POST, []() {
-    if (s_server.hasArg("url")) hook::setUrl(s_server.arg("url").c_str());
-    s_server.send(200, "application/json",
-      String("{\"url\":\"") + hook::url() + "\"" +
-      ",\"fired\":" + String(hook::fired()) +
-      ",\"last\":\"" + String(hook::lastResult()) + "\"}");
-  });
-
   // Relay-path stall profile. ?reset=1 zeroes it.
   s_server.on("/api/prof", HTTP_GET, []() {
     if (s_server.hasArg("reset")) cn2::profReset();
@@ -1871,7 +1824,7 @@ void begin() {
       j += ",\"" + String(BK[b]) + "\":" + String(cn2::profHist(b));
     j += ",\"worst_us\":" + String(cn2::worstGapUs());
     j += ",\"rx_backlog_max\":" + String(cn2::profRxMax());
-    static const char *CN[3] = {"http","nvs","hook"};
+    static const char *CN[3] = {"http","nvs","misc"};
     for (uint8_t w = 0; w < 3; w++) {
       uint32_t n, mx, tot; cn2::profCause(w, n, mx, tot);
       j += ",\"" + String(CN[w]) + "_n\":" + String(n);

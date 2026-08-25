@@ -156,12 +156,12 @@ Two of those matter in practice:
 switch. Check yours before wiring a relay it does not need — command `b0` during
 a wash and listen.
 
-⚠️ **Status bit 6 is not only a comms fault on the later unit.** It was observed
-asserted for hours with zero bad checksums in either direction, surviving power
-cycles, unaffected by draining or by firmware version (bisected across five
-builds). The panel renders it as `E5` and latches it. `POST /api/e5filter` can
-mask it — read the safety note there first, because masking removes whatever
-protection the bit represents.
+⚠️ **Status bit 6 is the controller's panel-frame-starvation latch.** On the
+later unit it latches until mains removal; the panel renders it as `E5`. Any
+gap in forwarding — a slow boot, a wedged relay, an interrupted OTA — can
+trip it, which is why the firmware bridges the pads in the first milliseconds
+of `setup()` and why you should never flash mid-cycle. The full investigation,
+including the wrong turns, is in [`docs/postmortem.md`](docs/postmortem.md).
 
 **Do not assume the error-code table transfers.** Ours comes from the early
 unit's manual (`BW05`, p.29). A later panel may number its codes differently,

@@ -205,64 +205,6 @@ struct StuckLoad {
 };
 
 // ---------------------------------------------------------------------------
-// Drain extension for PANEL-run cycles
-// ---------------------------------------------------------------------------
-// The drain stage is a FIXED DURATION in the machine's program -- 28 s on this
-// unit, 20 s on the earlier one -- and the machine has no idea whether the tub
-// actually emptied. Plumb it into a restricted line and it does not: measured
-// on this install, a normal 90-count charge takes 160 s to clear against a
-// 28 s stage. Every later stage then starts on top of standing water.
-//
-// The panel cannot be paused; it runs its own clock. But the FILL stage does
-// not end on time, it ends when the flow count reaches target, and the machine
-// has no fill timeout at either end -- it waits indefinitely. That is the lever:
-//
-//   hold DRAIN on, and hold INTAKE off, and the panel simply waits at its fill
-//   stage until we let go. Release, water flows, the count advances, and the
-//   program carries on in step. Nothing has to be faked and no stage is skipped.
-//
-// Aborts immediately if a heater bit appears. Draining while heating is the one
-// combination that must never be extended into, and a program that heats
-// straight after a drain is not one this can safely stretch.
-struct DrainExtend {
-  uint32_t extra_ms = 0;      // 0 disables
-  bool     active   = false;
-  uint32_t since    = 0;
-  bool     prev_drain = false;
-  uint32_t runs     = 0;
-
-  static const uint8_t DRAIN = LOAD_DRAIN;      // 0x02
-  static const uint8_t HEAT  = 0x04 | 0x08;
-
-  // Call once per checksum-valid panel frame with byte 1 BEFORE extension.
-  // Returns true on the frame that starts an extension, for one log line.
-  bool frame(uint8_t b1_want, uint32_t now) {
-    const bool draining = (b1_want & DRAIN) != 0;
-    bool started = false;
-    if (active) {
-      if (b1_want & HEAT)                            active = false;  // never extend into heat
-      else if ((uint32_t)(now - since) >= extra_ms)  active = false;
-    } else if (extra_ms && prev_drain && !draining && !(b1_want & HEAT)) {
-      active = true; since = now; runs++; started = true;             // drain just ended
-    }
-    prev_drain = draining;
-    return started;
-  }
-
-  uint8_t apply(uint8_t b1) const {
-    if (!active) return b1;
-    // Drain forced on, intake forced off: the panel waits at its fill stage
-    // because the count cannot advance, which is exactly the pause we need.
-    return (uint8_t)((b1 | DRAIN) & (uint8_t)~LOAD_INTAKE);
-  }
-  uint32_t remainMs(uint32_t now) const {
-    if (!active) return 0;
-    const uint32_t gone = now - since;
-    return gone >= extra_ms ? 0 : extra_ms - gone;
-  }
-};
-
-// ---------------------------------------------------------------------------
 // Over-temperature cutout for PANEL-run cycles
 // ---------------------------------------------------------------------------
 // This exists because of a trade, and the trade should be written down.
@@ -348,62 +290,6 @@ struct FillStall {
   }
   uint8_t apply(uint8_t b1) const {
     return cut ? (uint8_t)(b1 & (uint8_t)~LOAD_INTAKE) : b1;
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Untargeted-flush cap
-// ---------------------------------------------------------------------------
-// A panel frame carrying the INTAKE bit with fill target 0xFF is the cool-down
-// rinse: drain and intake together, no volume target, and no timeout at either
-// end of the link. It stops when the water stops arriving, which on a stock
-// machine means the hand-filled tank running dry -- the same Self-Clean program
-// was measured at 64.1 s and at 114.6 s. Give the tank an always-on supply and
-// nothing ends it at all.
-//
-// This bounds it. Once a flush has run `cap_ms` the caller strips the intake bit
-// from the forwarded byte 1 and leaves the drain bit alone, which reproduces the
-// event the controller already terminates on instead of inventing a new one.
-//
-// Two rules earn their keep and both are about not un-latching by accident:
-//
-//   1. `b1_want` must be byte 1 BEFORE the cap is applied. Fed the post-cap
-//      value, stripping the intake bit makes the trigger condition read false,
-//      the state clears, the bit comes back, and the pair oscillates at the
-//      frame rate.
-//   2. Releasing needs two consecutive non-flush frames. One dropped frame must
-//      not silently restart the clock -- that is the single error that would
-//      make the cap useless in exactly the case it exists for.
-struct FlushCap {
-  uint32_t cap_ms = 0;           // 0 disables
-  bool     on     = false;       // a 0xFF flush is being forwarded
-  bool     hold   = false;       // strip the intake bit now
-  uint32_t since  = 0;           // when the current flush started
-  uint32_t fired  = 0;           // lifetime caps
-  uint8_t  off    = 0;           // consecutive non-flush frames
-
-  static bool isFlush(uint8_t b1_want, uint8_t b3_fwd) {
-    return (b1_want & LOAD_INTAKE) != 0 && b3_fwd == 0xFF;
-  }
-
-  // Call once per checksum-valid panel frame. Returns true when this call is
-  // the one that trips the cap, so the caller can log it exactly once.
-  bool frame(uint8_t b1_want, uint8_t b3_fwd, uint32_t now) {
-    if (!isFlush(b1_want, b3_fwd)) {
-      if (on && ++off >= 2) { on = false; hold = false; off = 0; }
-      return false;
-    }
-    off = 0;
-    if (!on) { on = true; hold = false; since = now; }
-    if (cap_ms && !hold && (uint32_t)(now - since) >= cap_ms) {
-      hold = true; fired++; return true;
-    }
-    return false;
-  }
-
-  // The byte actually forwarded.
-  uint8_t apply(uint8_t b1_want) const {
-    return hold ? (uint8_t)(b1_want & (uint8_t)~LOAD_INTAKE) : b1_want;
   }
 };
 

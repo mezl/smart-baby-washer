@@ -215,11 +215,6 @@ uint16_t stuckOffS();
 uint32_t stuckFires();
 bool     stuckArmed();
 
-void     setDrainExtra(uint32_t ms);   // 0 disables, persisted
-uint32_t drainExtraMs();
-bool     drainExtending();
-uint32_t drainExtendRemainMs();
-uint32_t drainExtendRuns();
 
 void     setHeatCeiling(uint8_t c);  // 0 disables, persisted
 uint8_t  heatCeilingC();
@@ -228,12 +223,6 @@ uint32_t heatCeilingCuts();
 bool     fillStallCut();             // intake being stripped right now
 uint32_t fillStallCuts();
 
-void     setFlushCap(uint32_t ms);   // 0 disables, persisted to NVS
-uint32_t flushCapMs();
-bool     flushActive();              // a 0xFF flush is being forwarded now
-uint32_t flushMs();                  // how long it has run, 0 when not flushing
-bool     flushCapped();              // intake is currently being held down
-uint32_t flushCaps();                // lifetime count of caps fired
 
 // Last complete frame seen in each direction, as a hex string.
 String lastFrameHex(uint8_t side);
@@ -338,7 +327,7 @@ void        cycleResume();
 // Resume the NVS-persisted cycle after a reboot (the lockout recovery is a
 // mains cut, which reboots this board too). Restarts the interrupted stage
 // from zero. False if nothing was persisted or a cycle is already running.
-// Called by the HA watchdog after a verified unlock -- never automatically.
+// Auto-runs once after a power cycle behind strict gates, or via the API.
 bool        cycleRecover();
 bool        cycleRunning();
 uint8_t     cycleState();      // 0 idle, 1 running, 2 done, 3 aborted, 4 paused

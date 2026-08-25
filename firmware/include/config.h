@@ -5,14 +5,8 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.15.1"
+#define FW_VERSION  "1.16.3"
 
-// Lockout webhook: how long bit 6 must be held before summoning the HA
-// watchdog, and the floor between calls. The hold is deliberately longer than
-// the E5 filter's 25-frame debounce -- the webhook power-cycles the machine,
-// so it answers to a higher bar than masking a display code does.
-#define LOCK_HOOK_HOLD_MS    15000UL
-#define LOCK_HOOK_REPEAT_MS  300000UL
 
 // ---- Network identity ------------------------------------------------------
 // mDNS name, so nothing has to track the DHCP lease. Both the browser UI and
@@ -171,7 +165,6 @@
 // ends nothing, so the panel sat in one flush for 2131 s while the cap held the
 // intake off, turning a stall into a stall with no water. Only enable it on a
 // machine whose controller is known to honour the release.
-#define FLUSH_CAP_MS_DEFAULT  0UL
 
 // ---------------------------------------------------------------------------
 // Hold WiFi off until the panel link is up and quiet
@@ -221,7 +214,6 @@
 // restricted line against a 28 s stage, so 132 s is the shortfall. 0 disables.
 // Keep it close to what the line actually needs -- the drain pump runs dry for
 // whatever time is left over.
-#define DRAIN_EXTRA_MS_DEFAULT  0UL
 
 // ---------------------------------------------------------------------------
 // Stuck-load watchdog
