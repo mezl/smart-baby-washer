@@ -113,6 +113,7 @@ pio run -e c3 -t upload
 4. [**use.md**](docs/use.md) — the app, the engineering page, Home Assistant
 
 Reference: [board.md](docs/board.md) · [protocol.md](docs/protocol.md) ·
+[water-plumbing diagram](docs/diagrams/water-plumbing.svg) ·
 [cycles.md](docs/cycles.md) · [api.md](docs/api.md) ·
 [troubleshooting.md](docs/troubleshooting.md) · [hardware/pcb/](hardware/pcb/)
 

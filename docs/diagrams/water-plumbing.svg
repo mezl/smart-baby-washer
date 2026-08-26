@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 560" width="920" height="560" role="img" aria-label="Water plumbing as installed: household supply through a float valve keeps the tank topped up; the machine draws through its pickup and intake pump past the flow meter into the sump; the drain pump shares a drain line with the Roborock S7 dock.">
+<style>
+  .bg{fill:#fbfbfd}
+  .card{fill:#ffffff;stroke:#c9d1d9;stroke-width:2}
+  .oem{fill:#eef4fb;stroke:#1b6ec2}
+  .ours{fill:#eafaf1;stroke:#2f9e63}
+  .ext{fill:#fff6e8;stroke:#d98324}
+  .t{font:600 15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;fill:#111}
+  .s{font:12.5px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;fill:#444}
+  .tiny{font:11.5px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;fill:#666}
+  .m{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1b6ec2}
+  .warn{font:600 12.5px system-ui,sans-serif;fill:#b35900}
+  .water{stroke:#1b6ec2;stroke-width:3;fill:none}
+  .waste{stroke:#8a6d3b;stroke-width:3;fill:none;stroke-dasharray:7 4}
+</style>
+<rect class="bg" x="0" y="0" width="920" height="560"/>
+<text class="t" x="24" y="34">Water path — auto top-off tank, as installed</text>
+<text class="tiny" x="24" y="52">Blue solid = clean supply · dashed = waste. Boxes marked ? are assumptions — correct me.</text>
+
+<defs>
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1b6ec2"/></marker>
+  <marker id="w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#8a6d3b"/></marker>
+</defs>
+
+<!-- supply chain -->
+<rect class="card ext" x="24" y="80" width="170" height="64" rx="10"/>
+<text class="t" x="40" y="106">Household water</text>
+<text class="tiny" x="40" y="126">supply tee + shutoff ?</text>
+
+<line class="water" x1="194" y1="112" x2="262" y2="112" marker-end="url(#a)"/>
+<text class="tiny" x="200" y="102">¼″ line ?</text>
+
+<rect class="card ext" x="264" y="80" width="180" height="64" rx="10"/>
+<text class="t" x="280" y="106">Float valve</text>
+<text class="tiny" x="280" y="126">auto top-off, in the tank</text>
+
+<line class="water" x1="354" y1="144" x2="354" y2="192" marker-end="url(#a)"/>
+<text class="tiny" x="362" y="172">opens when level drops</text>
+
+<!-- tank -->
+<rect class="card oem" x="238" y="194" width="232" height="118" rx="10"/>
+<text class="t" x="254" y="220">Water tank</text>
+<text class="s" x="254" y="242">level held by the float —</text>
+<text class="s" x="254" y="260">refill is delayed only by the</text>
+<text class="s" x="254" y="278">valve’s own open threshold</text>
+<text class="tiny" x="254" y="300">tank must be SEATED: pickup valve at its base</text>
+
+<line class="water" x1="470" y1="253" x2="540" y2="253" marker-end="url(#a)"/>
+<text class="tiny" x="476" y="243">pickup</text>
+
+<!-- machine internals -->
+<rect class="card oem" x="542" y="176" width="354" height="200" rx="10"/>
+<text class="t" x="558" y="202">Momcozy D8</text>
+<rect class="card oem" x="558" y="214" width="150" height="52" rx="8"/>
+<text class="s" x="570" y="236">Intake pump</text>
+<text class="tiny" x="570" y="254">b5 · gated by controller</text>
+<line class="water" x1="708" y1="240" x2="748" y2="240" marker-end="url(#a)"/>
+<rect class="card ours" x="750" y="214" width="130" height="52" rx="8"/>
+<text class="s" x="762" y="236">Flow meter</text>
+<text class="tiny" x="762" y="254">1.7 counts/s healthy</text>
+<line class="water" x1="815" y1="266" x2="815" y2="296" marker-end="url(#a)"/>
+<rect class="card oem" x="558" y="298" width="322" height="62" rx="8"/>
+<text class="s" x="570" y="322">Wash sump — heater · wash pump · NTC</text>
+<text class="tiny" x="570" y="342">fills end on flow count; E1 = counts stop while intake commanded</text>
+
+<!-- drain chain -->
+<line class="waste" x1="640" y1="360" x2="640" y2="420" marker-end="url(#w)"/>
+<rect class="card oem" x="560" y="422" width="160" height="56" rx="10"/>
+<text class="t" x="576" y="446">Drain pump</text>
+<text class="tiny" x="576" y="466">b1</text>
+<line class="waste" x1="560" y1="450" x2="470" y2="450" marker-end="url(#w)"/>
+<rect class="card ext" x="276" y="422" width="192" height="56" rx="10"/>
+<text class="t" x="292" y="446">Shared drain line</text>
+<text class="tiny" x="292" y="466">slope/kink was the slow-drain fix ?</text>
+<line class="waste" x1="276" y1="450" x2="196" y2="450" marker-end="url(#w)"/>
+<rect class="card ext" x="24" y="422" width="170" height="56" rx="10"/>
+<text class="t" x="40" y="446">Roborock S7 dock</text>
+<text class="tiny" x="40" y="466">drain outlet</text>
+
+<!-- notes -->
+<text class="warn" x="24" y="516">⚠ With the float valve fitted, nothing bounds an untargeted flush (0xFF) but the drain — the panel’s own programs stay safe;</text>
+<text class="warn" x="46" y="534">avoid holding b5 manually for long periods.</text>
+<text class="tiny" x="24" y="554">Field history: E1 with a full tank twice traced to water not reaching the pickup (reseat fixed it), once to a dead override path (fw, fixed 1.15.1).</text>
+</svg>
