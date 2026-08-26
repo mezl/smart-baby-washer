@@ -183,8 +183,11 @@ function modeq(){
   return 'b2=&b3=';
 }
 function lsync(){
-  post('/api/mode_ovr?'+modeq());
-  post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16));
+  // SEQUENTIAL, deliberately: the board serves one HTTP client at a time,
+  // and two parallel posts race for the single slot -- the loser is dropped.
+  // Observed as "flush sets the mode but never the loads".
+  return post('/api/mode_ovr?'+modeq())
+    .then(()=>post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16)));
 }
 function lbit(k){
   LSET ^= (1<<k);
@@ -209,8 +212,8 @@ function stopFlush(){
   // running with no command able to stop it short of a power cycle --
   // learned live, with the tank auto-topping the whole time.
   FLUSHON=0; LSET &= ~0x20; LSET |= 0x02;
-  post('/api/mode_ovr?b2=&b3=');
-  post('/api/panel_ovr?clr=FF&set='+LSET.toString(16));
+  post('/api/mode_ovr?b2=&b3=')
+    .then(()=>post('/api/panel_ovr?clr=FF&set='+LSET.toString(16)));
   $('lflushb').classList.remove('on');
   $('lflushb').textContent='draining\u2026';
   $('lflushb').disabled=true;
@@ -223,7 +226,7 @@ function stopFlush(){
 $('lrel').onclick=()=>{
   if(FLUSHON){ stopFlush(); LSET=0x02; return; }   // flush needs its sequence
   LSET=0;
-  post('/api/panel_ovr?clr=0&set=0'); post('/api/mode_ovr?b2=&b3=');
+  post('/api/panel_ovr?clr=0&set=0').then(()=>post('/api/mode_ovr?b2=&b3='));
 };
 
 // Cutting mains needs two taps. It is the one control here that the machine
