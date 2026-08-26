@@ -102,3 +102,20 @@ polls read-only REST for display. No PC or HA daemon exists in the running
 or recovery path. Removed as dead or externally-coupled: the HA watchdog,
 telemetry logger, reachability watcher, lockout webhook (`hook.cpp`),
 FlushCap, DrainExtend, the WiFi TX cap.
+
+## Addendum (Aug 26): two more, both caught by the app's new flush button
+
+- **A 0xFF flush is controller-LATCHED**: it ignores a plain load release and
+  ends only when water stops arriving — the machine's own programs end it the
+  same way. Stopping one therefore means intake OFF, drain HELD (~20 s) until
+  the controller notices dry and terminates, then release. Releasing
+  everything at once leaves the intake running until a power cycle. (This is
+  also the behavior the removed FlushCap guarded — its mechanism was right
+  even if the feature was dead weight.)
+- **The idle-stream parse alias**: lose one byte on `AA 00 00 00 AA` traffic
+  and the previous frame's checksum plays the header — fake frames that
+  XOR-validate and self-sustain, wedging position-keyed rewrites forever
+  (observed as `b1fwd=0xAA`). Detection needs the byte-1 invariant (panel
+  byte 1 never carries bits 6/7); recovery needs a wire-gap-phased re-lock,
+  because header-hunting from inside the alias re-locks the same phase.
+  Fixed in cn2core::FramePos with host tests (fw 1.16.5).

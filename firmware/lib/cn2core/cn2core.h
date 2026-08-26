@@ -315,24 +315,69 @@ struct FillStall {
 // count. An unrecognised byte at index 0 leaves us parked at 0, scanning for
 // the next header, which is how a genuinely desynced stream re-locks without
 // ever mis-attributing a position.
+// One hole remained, and it cost a stuck flush: counting bytes cannot survive
+// a byte that never arrives. Lose one (RX overrun, glitch) and the counter is
+// permanently off-by-one -- insideFrame() stays true at every legitimate
+// inter-frame gap, so the gap-based reset (guarded by !insideFrame precisely
+// to survive drain-late stalls) can never fire. Every "frame" then fails its
+// checksum, every rewrite lands on the wrong byte, and the emitted stream is
+// garbage the controller ignores -- observed as an untargeted flush running
+// on with the release command corrupted in flight.
+//
+// The stall-immune recovery signal is the CHECKSUM, not the clock: every CN2
+// frame XORs to zero over all its bytes. A synced tracker sees that on every
+// frame; a desynced one fails it on every frame. Three consecutive failures
+// force a reset to header-hunting, which converges even if it first locks
+// onto a checksum byte that happens to read 0xAA -- that false lock fails
+// validation again and re-enters the hunt.
 struct FramePos {
   uint8_t i = 0, len = 0;
+  uint8_t x = 0;         // running XOR over the current frame (a valid frame XORs to 0)
+  uint8_t b1 = 0;        // the byte seen at index 1, for the alias check below
+  uint8_t badrun = 0;    // consecutive frames that failed validation
+  bool    hunting = false;  // desync declared: ignore bytes until a wire gap
 
-  // Call with each byte as it is about to be processed; returns its index
-  // within the frame, or 0xFF when we are not synced to a frame at all.
+  // Why validation needs more than the XOR: a one-byte slip on the idle panel
+  // stream (AA 00 00 00 AA repeated) produces fake frames [AA][AA][00][00][00]
+  // whose XOR is ALSO zero -- a self-sustaining alias in which the previous
+  // frame's checksum plays the header. The tell is index 1: in every one of
+  // ~100k captured panel frames, byte 1 never carries bits 6/7, but in the
+  // alias it is the real header, 0xAA. A frame is therefore invalid if its
+  // XOR is nonzero OR a 5-byte frame's byte 1 carries 0xC0 bits. Three
+  // consecutive invalid frames declare a desync; because header-hunting from
+  // inside the alias just re-locks onto the same phase, recovery waits for a
+  // WIRE gap (markGap(), called by the owner at a real inter-frame silence)
+  // and locks onto the first byte after it -- which is a true header.
   uint8_t feed(uint8_t b) {
+    if (hunting) return 0xFF;       // pass everything through until a gap
     if (i == 0) {
       len = frameLenFor(b);
+      x = 0;
       if (!len) return 0xFF;        // not a header: pass through, keep scanning
     }
+    if (i == 1) b1 = b;
+    x ^= b;
     return i;
   }
   // Call after the byte has been emitted.
   void advance() {
-    if (!len) return;               // never synced; stay at 0
-    if (++i >= len) { i = 0; len = 0; }
+    if (hunting || !len) return;    // never synced; stay at 0
+    if (++i >= len) {
+      const bool bad = (x != 0) || (len == 5 && (b1 & 0xC0) != 0);
+      if (bad) {
+        if (badrun < 0xFF) badrun++;
+        if (badrun >= 3) { reset(); hunting = true; return; }
+      } else {
+        badrun = 0;
+      }
+      i = 0; len = 0;
+    }
   }
-  void reset() { i = 0; len = 0; }
+  // The owner calls this when it observes a genuine inter-frame gap. While
+  // stalls can fake gaps mid-frame, a faked gap during recovery only causes
+  // a mis-lock that fails validation and re-enters the hunt -- it converges.
+  void markGap() { if (hunting) { hunting = false; i = 0; len = 0; } }
+  void reset() { i = 0; len = 0; x = 0; b1 = 0; badrun = 0; hunting = false; }
   bool insideFrame() const { return len != 0 && i != 0; }
 };
 

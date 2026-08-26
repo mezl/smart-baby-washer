@@ -1089,8 +1089,54 @@ static void test_stuck_zero_disables(void) {
   TEST_ASSERT_EQUAL_UINT32(0, w.fires);
 }
 
+// ---- FramePos desync recovery ---------------------------------------------
+static void test_framepos_survives_clean_stream(void) {
+  cn2core::FramePos p;
+  const uint8_t f[5] = {0xAA, 0x00, 0x00, 0x00, 0xAA};
+  for (int r = 0; r < 6; r++)
+    for (int k = 0; k < 5; k++) {
+      TEST_ASSERT_EQUAL_UINT8(k, p.feed(f[k]));
+      p.advance();
+    }
+  TEST_ASSERT_EQUAL_UINT8(0, p.badrun);
+  TEST_ASSERT_FALSE(p.hunting);
+}
+
+static void test_framepos_single_corrupt_byte_no_reset(void) {
+  cn2core::FramePos p;
+  const uint8_t good[5] = {0xAA, 0x00, 0x00, 0x00, 0xAA};
+  const uint8_t bad[5]  = {0xAA, 0x00, 0x04, 0x00, 0xAA};
+  for (int k = 0; k < 5; k++) { p.feed(bad[k]); p.advance(); }
+  TEST_ASSERT_EQUAL_UINT8(1, p.badrun);
+  for (int k = 0; k < 5; k++) { p.feed(good[k]); p.advance(); }
+  TEST_ASSERT_EQUAL_UINT8(0, p.badrun);
+  TEST_ASSERT_FALSE(p.hunting);
+}
+
+static void test_framepos_alias_detected_and_recovered(void) {
+  cn2core::FramePos p;
+  const uint8_t f[5] = {0xAA, 0x00, 0x00, 0x00, 0xAA};
+  for (int k = 0; k < 5; k++) { p.feed(f[k]); p.advance(); }
+  for (int k = 0; k < 4; k++) { p.feed(f[k]); p.advance(); }   // one byte lost
+  for (int r = 0; r < 4 && !p.hunting; r++)
+    for (int k = 0; k < 5 && !p.hunting; k++) { p.feed(f[k]); p.advance(); }
+  TEST_ASSERT_TRUE(p.hunting);
+  TEST_ASSERT_EQUAL_UINT8(0xFF, p.feed(0xAA));   // hunting: all pass-through
+  p.markGap();
+  for (int r = 0; r < 2; r++)
+    for (int k = 0; k < 5; k++) {
+      TEST_ASSERT_EQUAL_UINT8(k, p.feed(f[k]));
+      p.advance();
+    }
+  TEST_ASSERT_EQUAL_UINT8(0, p.badrun);
+  TEST_ASSERT_FALSE(p.hunting);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
+  RUN_TEST(test_framepos_survives_clean_stream);
+  RUN_TEST(test_framepos_single_corrupt_byte_no_reset);
+  RUN_TEST(test_framepos_alias_detected_and_recovered);
   RUN_TEST(test_frameLenFor_known_headers);
   RUN_TEST(test_frameLenFor_rejects_junk);
   RUN_TEST(test_xorOf_matches_captured_checksums);

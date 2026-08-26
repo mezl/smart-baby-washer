@@ -806,9 +806,9 @@ static void pump() {
     uint32_t now_us = micros();
     // A clock gap may only resync when nothing is in flight. Mid-frame it is
     // far more likely to be OUR stall than a real break -- see FramePos.
-    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs() && !s_bp_pos.insideFrame()) {
-      s_bp_pos.reset(); s_bp_x = 0;
-      fwFlush(0);
+    if ((uint32_t)(now_us - s_bp_prev) > frameGapUs()) {
+      s_bp_pos.markGap();                       // ends a declared desync hunt
+      if (!s_bp_pos.insideFrame()) { s_bp_pos.reset(); s_bp_x = 0; fwFlush(0); }
     }
     s_bp_i = s_bp_pos.feed(b);       // 0xFF = unsynced: rewrite nothing
     s_bp_prev = now_us;
@@ -907,9 +907,9 @@ static void pump() {
     uint8_t b = (uint8_t)uPanel.read();
 
     uint32_t nu = micros();
-    if ((uint32_t)(nu - s_pb_prev) > frameGapUs() && !s_pb_pos.insideFrame()) {
-      s_pb_pos.reset(); s_pb_x = 0;
-      fwFlush(1);
+    if ((uint32_t)(nu - s_pb_prev) > frameGapUs()) {
+      s_pb_pos.markGap();                       // ends a declared desync hunt
+      if (!s_pb_pos.insideFrame()) { s_pb_pos.reset(); s_pb_x = 0; fwFlush(1); }
     }
     s_pb_i = s_pb_pos.feed(b);
     s_pb_prev = nu;

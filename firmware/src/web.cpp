@@ -120,7 +120,8 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
   <h1 style="margin:0 0 2px">LOADS &mdash; DIRECT CONTROL</h1>
   <div class=sub id=loadsub></div>
   <div class=loads id=loads></div>
-  <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:10px">RELEASE ALL</button>
+  <button class=go id=lflushb onclick=lflush() style="background:#123a5c;border-color:#1b6ec2;color:#cfe6ff;margin-top:10px">FLUSH (intake + drain)</button>
+  <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:8px">RELEASE ALL</button>
   <button class=go id=lcut style="background:#5c1d1d;border-color:#f85149;color:#ffecec;margin-top:8px;display:none">CUT MAINS</button>
   <div class=warn2 id=cutnote style="display:none">Cuts power at the smart plug &mdash;
     the only way to stop a load the controller has latched on. <b>The machine stays
@@ -169,12 +170,61 @@ $('go').onclick=go;
 // one tap target invites the wrong one.
 const LOADS=[[0,'Wash pump','b0'],[1,'Drain','b1'],[2,'Water heat','b2'],
              [3,'Air heat','b3'],[4,'Blower','b4'],[5,'Intake','b5']];
-let LSET=0;
-function lbit(k){
-  LSET ^= (1<<k);
+let LSET=0, FLUSHON=0;
+// The controller refuses a TARGETLESS intake: b5 alone never runs the pump
+// (proved the hard way -- see docs/postmortem.md). So the intake toggle also
+// sets a fill target, using byte pairs lifted from cycles that completed on
+// this machine: a small 20-count fill (2A/07) for plain intake, and FF/FF
+// for a flush. Flush is intake + drain together (0x22, the machine's own
+// composite) so the auto-top-off tank cannot overflow the sump.
+function modeq(){
+  if(FLUSHON)        return 'b2=ff&b3=ff';
+  if(LSET & 0x20)    return 'b2=2a&b3=07';
+  return 'b2=&b3=';
+}
+function lsync(){
+  post('/api/mode_ovr?'+modeq());
   post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16));
 }
-$('lrel').onclick=()=>{ LSET=0; post('/api/panel_ovr?clr=0&set=0'); };
+function lbit(k){
+  LSET ^= (1<<k);
+  // dropping the intake by hand while flushing must go through the proper
+  // stop sequence -- see stopFlush() for why a plain release is not enough
+  if(k===5 && !(LSET&0x20) && FLUSHON){ stopFlush(); return; }
+  lsync();
+}
+function lflush(){ FLUSHON ? stopFlush() : startFlush(); }
+function startFlush(){
+  FLUSHON=1; LSET |= 0x22;
+  lsync();
+  $('lflushb').classList.add('on');
+  $('lflushb').textContent='FLUSHING — tap to stop';
+}
+function stopFlush(){
+  // A 0xFF flush is LATCHED by the controller: it ignores a plain release
+  // and only terminates when the water stops arriving (this is also how the
+  // machine's own programs end it). So stopping is a sequence: intake OFF,
+  // drain KEPT ON while the controller notices dry and ends its flush, then
+  // release the drain too. Releasing everything at once leaves the intake
+  // running with no command able to stop it short of a power cycle --
+  // learned live, with the tank auto-topping the whole time.
+  FLUSHON=0; LSET &= ~0x20; LSET |= 0x02;
+  post('/api/mode_ovr?b2=&b3=');
+  post('/api/panel_ovr?clr=FF&set='+LSET.toString(16));
+  $('lflushb').classList.remove('on');
+  $('lflushb').textContent='draining\u2026';
+  $('lflushb').disabled=true;
+  setTimeout(()=>{
+    LSET &= ~0x02; lsync();
+    $('lflushb').disabled=false;
+    $('lflushb').textContent='FLUSH (intake + drain)';
+  }, 20000);
+}
+$('lrel').onclick=()=>{
+  if(FLUSHON){ stopFlush(); LSET=0x02; return; }   // flush needs its sequence
+  LSET=0;
+  post('/api/panel_ovr?clr=0&set=0'); post('/api/mode_ovr?b2=&b3=');
+};
 
 // Cutting mains needs two taps. It is the one control here that the machine
 // cannot undo -- and neither can this board, which the plug also powers.
