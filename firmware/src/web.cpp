@@ -1807,6 +1807,9 @@ void begin() {
   //   POST /api/kasa?cycle=30                 — power-cycle NOW (refuses mid-cycle)
   s_server.on("/api/kasa", HTTP_POST, []() {
     if (s_server.hasArg("ip")) kasa::setPlug(s_server.arg("ip").c_str());
+    if (s_server.hasArg("type"))
+      kasa::setPlugType(s_server.arg("type") == "shelly" ? kasa::PLUG_SHELLY
+                                                         : kasa::PLUG_KASA);
     String extra = "";
     if (s_server.hasArg("test"))
       extra = ",\"reachable\":" + String(kasa::reachable() ? "true" : "false");

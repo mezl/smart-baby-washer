@@ -37,4 +37,4 @@ while True:
             f.write(json.dumps(row, separators=(",",":")) + "\n")
     except Exception:
         pass                      # board down: log nothing, keep trying
-    time.sleep(max(0.5, 2 - (time.time() - t0)))
+    time.sleep(max(0.5, 5 - (time.time() - t0)))

@@ -11,7 +11,10 @@
 // FIRST, then switch off. The plug restores itself with no help from us.
 namespace kasa {
 void        begin();                  // loads the plug address from NVS
+enum { PLUG_KASA = 0, PLUG_SHELLY = 1 };
 void        setPlug(const char *ip);
+uint8_t     plugType();
+void        setPlugType(uint8_t t);
 const char *plugIp();
 bool        configured();
 

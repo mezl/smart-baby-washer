@@ -8,6 +8,7 @@
 namespace kasa {
 
 static char     s_ip[20]   = {0};
+static uint8_t  s_type     = 0;     // PLUG_KASA=0, PLUG_SHELLY=1
 static uint32_t s_last     = 0;
 static char     s_err[64]  = "never used";
 static Preferences s_prefs;
@@ -29,8 +30,31 @@ void setPlug(const char *ip) {
 void begin() {
   s_prefs.begin("d8link", true);
   String v = s_prefs.getString("kasa", "");
+  s_type = s_prefs.getUChar("plugt", PLUG_KASA);
   s_prefs.end();
   strncpy(s_ip, v.c_str(), sizeof(s_ip) - 1);
+}
+
+// ---- Shelly Gen2+ (the plug since 2026-08-26): one HTTP GET ---------------
+// GET /rpc/Switch.Set?id=0&on=false -- no framing, no cipher. The device is
+// configured with initial_state=on, so mains restoration re-energises by
+// itself; a one-way protective cut can never strand the machine the way the
+// HS103's last-state behaviour could.
+static bool shellyCall(const char *path, uint32_t timeout_ms = 4000) {
+  if (!s_ip[0]) { snprintf(s_err, sizeof(s_err), "no plug configured"); return false; }
+  if (WiFi.status() != WL_CONNECTED) { snprintf(s_err, sizeof(s_err), "wifi down"); return false; }
+  WiFiClient c;
+  c.setTimeout(timeout_ms);
+  if (!c.connect(s_ip, 80, timeout_ms)) { snprintf(s_err, sizeof(s_err), "connect failed"); return false; }
+  c.printf("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, s_ip);
+  uint32_t t0 = millis();
+  while (c.connected() && !c.available() && millis() - t0 < timeout_ms) delay(10);
+  String line = c.readStringUntil('\n');
+  c.stop();
+  s_last = millis();
+  const bool ok = line.indexOf("200") > 0;
+  snprintf(s_err, sizeof(s_err), ok ? "ok" : "http: %s", line.c_str());
+  return ok;
 }
 
 // One request/response on port 9999. Returns true if the reply contains
@@ -84,14 +108,29 @@ static bool call(const char *json, uint32_t timeout_ms = 3000) {
   return false;
 }
 
-bool reachable() { return call("{\"system\":{\"get_sysinfo\":{}}}"); }
+bool reachable() {
+  return s_type == PLUG_SHELLY ? shellyCall("/rpc/Shelly.GetDeviceInfo")
+                               : call("{\"system\":{\"get_sysinfo\":{}}}");
+}
 
 bool powerOff() {
-  // Leave no stale countdown behind that could re-energise the machine later.
+  if (s_type == PLUG_SHELLY) {
+    Serial.println("[plug ] opening the Shelly relay — initial_state=on means "
+                   "the next mains event restores it, but until then: OFF");
+    return shellyCall("/rpc/Switch.Set?id=0&on=false");
+  }
+  // Kasa: leave no stale countdown behind that could re-energise it later.
   call("{\"count_down\":{\"delete_all_rules\":{}}}");
   Serial.println("[kasa ] opening the relay — machine will STAY OFF until "
                  "someone restores it");
   return call("{\"system\":{\"set_relay_state\":{\"state\":0}}}");
+}
+
+uint8_t plugType() { return s_type; }
+void setPlugType(uint8_t t) {
+  s_type = t;
+  Preferences p; p.begin("d8link", false); p.putUChar("plugt", t); p.end();
+  Serial.printf("[plug ] type = %s\n", t == PLUG_SHELLY ? "shelly" : "kasa");
 }
 
 }  // namespace kasa
