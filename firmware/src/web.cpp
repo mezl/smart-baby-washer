@@ -122,6 +122,8 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
   <h1 style="margin:0 0 2px">LOADS &mdash; DIRECT CONTROL</h1>
   <div class=sub id=loadsub></div>
   <div class=loads id=loads></div>
+  <button class=go id=wmode onclick=wtoggle() style="background:#233;border-color:#466;color:#cee;margin-top:10px">MODE: &hellip;</button>
+  <div class=lbl id=wnote style="margin:4px 0 0 2px"></div>
   <div style="margin-top:10px;font:11px ui-monospace,Menlo,monospace;color:#8aa">LID OVERRIDE
     <span style="float:right">
       <button class=sm id=lidm0 onclick="lidset(0)">real</button>
@@ -196,6 +198,22 @@ function lsync(){
   // Observed as "flush sets the mode but never the loads".
   return post('/api/mode_ovr?'+modeq())
     .then(()=>post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16)));
+}
+let WIRE=null;
+function wpaint(){
+  if(WIRE===null) return;
+  $('wmode').textContent = WIRE ? 'MODE: WIRE (silicon pass-through)'
+                                : 'MODE: RELAY (CPU, controls live)';
+  $('wmode').style.background = WIRE ? '#1d3a2a' : '#233047';
+  $('wmode').style.borderColor = WIRE ? '#2f9e63' : '#1b6ec2';
+  $('wnote').innerHTML = WIRE
+    ? 'forwarding runs in hardware &mdash; all buttons above are DORMANT until you switch to relay'
+    : 'CPU relay: every control on this page is live';
+}
+function wtoggle(){
+  WIRE = WIRE ? 0 : 1;
+  wpaint();                                   // optimistic; poll reconfirms
+  post('/api/wire?on='+(WIRE?1:0));           // persisted to NVS by the firmware
 }
 let LIDM=0;
 function lidset(m){
@@ -378,7 +396,12 @@ function wifiIcon(rssi){
     +'<path d="M2.5 8 a14 14 0 0 1 19 0" stroke="'+c(3)+'" stroke-width="2.4" fill="none"/>'
     +'</svg>';
 }
+function syncWire(a){
+  if(typeof a.wire==='boolean' && WIRE===null){ WIRE = a.wire?1:0; wpaint(); }
+  else if(typeof a.wire==='boolean' && (a.wire?1:0)!==WIRE){ WIRE=a.wire?1:0; wpaint(); }
+}
 function sysline(a){
+  syncWire(a);
   const up=a.uptime_s|0, h=Math.floor(up/3600), m=Math.floor(up%3600/60);
   if(typeof a.lid_mode==='number' && !document.activeElement.id.startsWith('lidm')){ LIDM=a.lid_mode; paintLid(); }
   $('sys').innerHTML =
