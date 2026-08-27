@@ -698,6 +698,11 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
 <div class=box id=gflowbox><b>FLOW PULSES &mdash; 60 s
   <span class=lbl style="float:right;font-weight:400;letter-spacing:0" id=gfnow></span></b>
   <div id=gflow></div></div>
+
+<div class=box id=gpwbox style="display:none"><b>PLUG POWER &mdash; 30 min
+  <span class=lbl style="float:right;font-weight:400;letter-spacing:0" id=gpnow></span></b>
+  <div id=gpw></div>
+  <div class=lbl>whole-machine draw at the smart outlet &mdash; pumps ~30 W, water heater ~1.3 kW, dry ~700 W</div></div>
 </div>
 
 </div>
@@ -974,6 +979,17 @@ function svgTemp(raw, air, cutout, W){
   return o+'</svg>';
 }
 
+function hexWords(h){const a=[];for(let i=0;i+3<h.length;i+=4)a.push(parseInt(h.substr(i,4),16));return a}
+function svgPower(p, W){
+  const H=64, n=p.length;
+  if(!n) return '<div class=lbl>no samples yet</div>';
+  const mx=Math.max(10,...p);
+  let o=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block">`;
+  o+=`<text x="2" y="10" fill="#556" font-size="9">${mx} W</text>`;
+  o+='<polyline fill="none" stroke="#c586c0" stroke-width="1.6" points="'+
+     p.map((v,i)=>`${(i/(Math.max(1,n-1))*W).toFixed(1)},${(H-2-(v/mx)*(H-14)).toFixed(1)}`).join(' ')+'"/>';
+  return o+'</svg>';
+}
 function svgFlow(f, W){
   const H=64,L=26,R=6,T=6,Bm=12;
   if(f.length<2) return '<div class=lbl>no samples yet</div>';
@@ -1002,6 +1018,11 @@ async function graphs(){
     const raw=hexBytes(g.temp), f=hexBytes(g.flow), air=hexBytes(g.air||'');
     const gw=Math.max(320,($('gtemp').clientWidth||900)-2);
     $('gtemp').innerHTML=svgTemp(raw,air,g.cutout,gw);
+    if(g.pw && g.pw.length){
+      $('gpwbox').style.display='';
+      $('gpw').innerHTML=svgPower(hexWords(g.pw),gw);
+      $('gpnow').innerHTML='now <b>'+(g.pwnow|0)+' W</b>'+(g.pwok?'':' <span class=bad>(stale)</span>');
+    }
     const t=raw.length?(raw[raw.length-1]&0x7F):0;
     const h=raw.length?((raw[raw.length-1]&0x80)!==0):false;
     const a=air.length?(air[air.length-1]!==0):false;
@@ -1641,6 +1662,7 @@ static String statusJson() {
   j += ",\"e5f_doubt\":" + String(cn2::e5FilterDoubt());
   j += ",\"e5f_why\":\"" + String(cn2::e5FilterWhy()) + "\"";
   j += ",\"kasa_ip\":\"" + String(kasa::plugIp()) + "\"";
+  j += ",\"plug_w\":" + String(kasa::plugWatts());
   j += ",\"stuck_ms\":" + String(cn2::stuckDwellMs());
   j += ",\"stuck_c\":" + String(cn2::stuckHotC());
   j += ",\"stuck_off\":" + String(cn2::stuckOffS());
@@ -2375,6 +2397,9 @@ void begin() {
     j += ",\"air\":\"" + cn2::trendAirHex() + "\"";
     j += ",\"flow\":\"" + cn2::trendFlowHex() + "\"";
     j += ",\"cutout\":" + String(cn2::trendCutout());
+    j += ",\"pw\":\"" + kasa::plugPowerHex() + "\"";
+    j += ",\"pwnow\":" + String(kasa::plugWatts());
+    j += ",\"pwok\":" + String(kasa::plugWattsOk() ? "true" : "false");
     j += ",\"filling\":" + String(cn2::trendFlowActive() ? "true" : "false") + "}";
     s_server.send(200, "application/json", j);
   });

@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <Arduino.h>
 
 // Minimal TP-Link Kasa client — enough to power-cycle a plug from the ESP32.
 //
@@ -14,6 +15,10 @@ void        begin();                  // loads the plug address from NVS
 enum { PLUG_KASA = 0, PLUG_SHELLY = 1 };
 void        setPlug(const char *ip);
 bool        powerCycle(uint16_t hold_s);   // Shelly only: off, self-restore
+void        powerPoll();                   // call from the MAIN loop
+uint16_t    plugWatts();
+bool        plugWattsOk();
+String      plugPowerHex();                // 30-min ring, 4 hex chars/sample
 uint8_t     plugType();
 void        setPlugType(uint8_t t);
 const char *plugIp();

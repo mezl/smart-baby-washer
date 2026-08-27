@@ -180,6 +180,7 @@ void loop() {
   esp_task_wdt_reset();
 
   net::loop();     // ArduinoOTA.handle() + link watchdog
+  kasa::powerPoll();
   web::loop();
   if (!g_safe_mode) cn2::loop();
 

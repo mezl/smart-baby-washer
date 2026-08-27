@@ -141,6 +141,55 @@ bool powerCycle(uint16_t hold_s) {
   return shellyCall(path);
 }
 
+// ---- plug power telemetry (Shelly only) -----------------------------------
+// Polled from the MAIN loop every few seconds; a 30-minute ring mirrors the
+// temperature/flow trends on the dev page. Watts as uint16 (heater ~1.3 kW).
+#define PW_N 600                       // 30 min at 3 s
+static uint16_t s_pw[PW_N];
+static uint16_t s_pw_head = 0, s_pw_len = 0;
+static uint16_t s_pw_now = 0;
+static uint32_t s_pw_last = 0;
+static bool     s_pw_ok = false;
+
+void powerPoll() {
+  if (s_type != PLUG_SHELLY || !s_ip[0]) return;
+  if (millis() - s_pw_last < 3000) return;
+  s_pw_last = millis();
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClient c;
+  c.setTimeout(1500);
+  if (!c.connect(s_ip, 80, 1500)) { s_pw_ok = false; return; }
+  c.printf("GET /rpc/Switch.GetStatus?id=0 HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", s_ip);
+  uint32_t t0 = millis();
+  String body;
+  while ((c.connected() || c.available()) && millis() - t0 < 1500) {
+    while (c.available()) body += (char)c.read();
+    delay(5);
+  }
+  c.stop();
+  int k = body.indexOf("\"apower\":");
+  if (k < 0) { s_pw_ok = false; return; }
+  float w = body.substring(k + 9).toFloat();
+  if (w < 0) w = 0;
+  s_pw_now = (uint16_t)(w + 0.5f);
+  s_pw_ok = true;
+  s_pw[s_pw_head] = s_pw_now;
+  s_pw_head = (uint16_t)((s_pw_head + 1) % PW_N);
+  if (s_pw_len < PW_N) s_pw_len++;
+}
+uint16_t plugWatts()  { return s_pw_now; }
+bool     plugWattsOk(){ return s_pw_ok; }
+String   plugPowerHex() {
+  String o; o.reserve(s_pw_len * 4);
+  static const char *H = "0123456789ABCDEF";
+  uint16_t start = (uint16_t)((s_pw_head + PW_N - s_pw_len) % PW_N);
+  for (uint16_t k = 0; k < s_pw_len; k++) {
+    uint16_t v = s_pw[(start + k) % PW_N];
+    o += H[(v >> 12) & 15]; o += H[(v >> 8) & 15]; o += H[(v >> 4) & 15]; o += H[v & 15];
+  }
+  return o;
+}
+
 uint8_t plugType() { return s_type; }
 void setPlugType(uint8_t t) {
   s_type = t;
