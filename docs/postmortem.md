@@ -138,3 +138,25 @@ host tests cover every firmware-caused starvation; this failure class --
 dead copper past the pad -- is detectable at runtime only as "controller
 stops obeying while its frames keep arriving", now documented as the
 signature to check FIRST before another twelve-hour software hunt.
+
+## Addendum (Aug 26, late): boot-sequence profile — the definitive answer
+
+Frame-level capture of a failing boot, diffed against archived healthy
+traffic (captures/boot-frames-e5-20260826.txt):
+
+    t=105 ms   panel:      AA 00 00 00 AA            first poll, on time
+    t=109 ms   controller: A2 00 00 00 04 00 03 ...  byte3 CLEAR at birth
+    t=711 ms   controller: byte5 initializes to 0x0A  (healthy logs: 0x09)
+    t=5113 ms  panel:      AA 00 00 00 AA            25th perfect poll
+    t=5125 ms  controller: byte3 0x00 -> 0x40        LATCHES, mid-dialogue
+
+The dialogue is exonerated at the frame level: 200 ms cadence unbroken,
+every checksum valid, the polls before and after the latch byte-identical.
+The controller boots CLEAR and latches on its own ~5 s check. The named
+culprit is in byte 5: healthy 0x09 (0b1001), failing 0x0A (0b1010) --
+bit 0 OFF and bit 1 ON, the signature of ONE changeover switch (NC/NO
+pair) that physically flipped inside the machine during the flood window
+and has stayed flipped through every power cycle since: a float/leak
+switch held up by water (or stuck). When it drops, byte 5 reads 0x09
+again and boots pass the 5-second check. Nothing on the CN2 wire can
+change it.
