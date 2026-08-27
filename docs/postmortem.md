@@ -119,3 +119,22 @@ FlushCap, DrainExtend, the WiFi TX cap.
   byte 1 never carries bits 6/7); recovery needs a wire-gap-phased re-lock,
   because header-hunting from inside the alias re-locks the same phase.
   Fixed in cn2core::FramePos with host tests (fw 1.16.5).
+
+## Addendum (Aug 26 night): the TX-to-controller channel died — hardware
+
+Evening-long E5 recurrence, finally isolated to a one-direction hardware
+failure between our TX pad and the controller's RX pin (level-shifter
+channel 2 / HV2 wiring, per the build map). Evidence chain, all remote:
+the TX pad demonstrably drives (edge counts mirror the forwarded panel
+frames), 13k+ bytes queued with zero errors our side — while the controller
+executes nothing through any state: intake moves no water, 60 s of
+commanded wash+heat moves the NTC 0.0 °C, and it latches bit 6 seconds
+after every boot exactly as a panel-starved controller should. The
+controller->us direction stayed perfect throughout, which is why every
+software probe said "healthy". Firmware was exonerated by rollback (the
+field-proven 1.15.1 behaved identically) and by the masked-boot race.
+Repair: meter HV2 (should idle ~5 V), swap the BSS138 board. The E5Model
+host tests cover every firmware-caused starvation; this failure class --
+dead copper past the pad -- is detectable at runtime only as "controller
+stops obeying while its frames keep arriving", now documented as the
+signature to check FIRST before another twelve-hour software hunt.
