@@ -393,6 +393,21 @@ bool wire() { return s_wire; }
 // Reads only NVS (fast) to respect a saved LISTEN map (tx pins -1 => drive
 // nothing) and the wire preference. openPorts() later hands the TX pads to
 // the UARTs for about a millisecond; wireSet(true) immediately re-bridges.
+// Register-only, zero-dependency bridge for the first microseconds of boot.
+// Hardcoded to the as-wired pin map; earlyBridge() corrects from NVS later.
+void instantBridge() {
+  const int8_t rxb = 5, txb = 6, txp = 3, rxp = 4;
+  gpio_ll_input_enable(&GPIO, (uint32_t)rxb);
+  gpio_ll_input_enable(&GPIO, (uint32_t)rxp);
+  esp_rom_gpio_connect_in_signal(rxb, SIG_IN_FUNC_97_IDX, false);
+  esp_rom_gpio_connect_out_signal(txp, SIG_IN_FUNC_97_IDX, false, false);
+  esp_rom_gpio_connect_in_signal(rxp, SIG_IN_FUNC_98_IDX, false);
+  esp_rom_gpio_connect_out_signal(txb, SIG_IN_FUNC_98_IDX, false, false);
+  GPIO.func_out_sel_cfg[txp].oen_sel = 1;
+  GPIO.func_out_sel_cfg[txb].oen_sel = 1;
+  GPIO.enable_w1ts.enable_w1ts = (1UL << txp) | (1UL << txb);
+}
+
 void earlyBridge() {
   Preferences p;
   p.begin("d8link", true);
@@ -534,9 +549,17 @@ void begin() {
   s_prefs.end();
   // Before anything else can command it. Until this runs the pin is high-Z and
   // the external pull resistor is the only thing holding the pump off.
-  wsrIdlePin(s_wsr_pin);
-  Serial.printf("[wsr  ] wash-pump relay on GPIO%d, active-%s, mode %u\n",
-                (int)s_wsr_pin, s_wsr_low ? "LOW" : "HIGH", s_wsr_mode);
+  // Only touch the pin when the relay feature is actually in use. GPIO10 is
+  // double-booked with the flow-meter tap by the carrier design, and this
+  // unit (b0 works natively) never uses the relay -- unconditionally driving
+  // the pin at boot puts a hard level onto whatever the builder wired there.
+  if (s_wsr_mode != WSR_OFF) {
+    wsrIdlePin(s_wsr_pin);
+    Serial.printf("[wsr  ] wash-pump relay on GPIO%d, active-%s, mode %u\n",
+                  (int)s_wsr_pin, s_wsr_low ? "LOW" : "HIGH", s_wsr_mode);
+  } else {
+    Serial.println("[wsr  ] mode off -- relay pin left untouched (high-Z)");
+  }
   // How long the panel was starved across the last update, reboot included.
   if (s_ota_magic == OTA_MAGIC) {
     s_ota_magic = 0;
@@ -2527,20 +2550,19 @@ static void resumeTick() {
 // a 180 s cut is a hardware condition no amount of cycling fixes -- see
 // docs/postmortem.md). The counter resets whenever the controller is seen
 // clear for ten minutes. Cycle progress survives via resumeTick().
-static uint32_t s_heal_clear_ms = 0;
+// Lessons from the night of Aug 26-27, learned in pump-hours: the breaker
+// used to self-reset after ten clear minutes -- but a MARGINAL input reads
+// clear for stretches while staying broken, so the loop cycled the machine
+// all night, and every controller boot runs its own drain+intake flush.
+// ~292 Wh of water churn later: the breaker never self-resets now, and the
+// whole feature is OPT-IN (NVS "heal", default off). Reset and enablement
+// live on /api/heal, i.e., with a human.
 static void selfHealTick() {
   static const uint16_t HOLD[3] = {120, 180, 300};
-  if (!(s_st_real & 0x40)) {
-    if (!s_heal_clear_ms) s_heal_clear_ms = millis() | 1;
-    else if (millis() - s_heal_clear_ms > 600000UL) {
-      Preferences p; p.begin("d8link", false);
-      if (p.getUChar("healn", 0)) p.putUChar("healn", 0);
-      p.end();
-      s_heal_clear_ms = millis() | 1;
-    }
-    return;
-  }
-  s_heal_clear_ms = 0;
+  { static int8_t en = -1;
+    if (en < 0) { Preferences p; p.begin("d8link", true); en = p.getBool("heal", false) ? 1 : 0; p.end(); }
+    if (!en) return; }
+  if (!(s_st_real & 0x40)) return;
   if (lockedForMs() < 60000UL) return;          // give transients a minute
   if (s_panel_b1 != 0) return;                  // never cut commanded loads... 
   // ...except that a LOCKED controller ignores the panel anyway; a lock held

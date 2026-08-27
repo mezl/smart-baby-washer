@@ -1992,6 +1992,35 @@ void begin() {
     s_server.send(200, "application/json", j);
   });
 
+  // Self-heal control: opt-in, and the strike counter only resets here.
+  s_server.on("/api/heal", HTTP_POST, []() {
+    Preferences p; p.begin("d8link", false);
+    if (s_server.hasArg("on"))    p.putBool("heal", s_server.arg("on").toInt() != 0);
+    if (s_server.hasArg("reset")) p.putUChar("healn", 0);
+    const bool en = p.getBool("heal", false);
+    const uint8_t n = p.getUChar("healn", 0);
+    p.end();
+    s_server.send(200, "application/json",
+      String("{\"ok\":true,\"enabled\":") + (en ? "true" : "false") +
+      ",\"strikes\":" + String(n) + "}");
+  });
+
+  // Erase the entire d8link NVS namespace and reboot into compile-time
+  // defaults. The blunt instrument for state-poisoning bisects: firmware
+  // rollbacks never touched NVS, so a corrupt key survives every flash.
+  s_server.on("/api/nvswipe", HTTP_POST, []() {
+    if (s_server.arg("confirm") != "yes") {
+      s_server.send(400, "application/json",
+        "{\"ok\":false,\"err\":\"need confirm=yes\"}");
+      return;
+    }
+    Preferences p; p.begin("d8link", false);
+    p.clear(); p.end();
+    s_server.send(200, "application/json", "{\"ok\":true,\"wiped\":true}");
+    delay(300);
+    ESP.restart();
+  });
+
   // Byte-perfect on demand. Turning this on strips every rewrite at the emit
   // point, so the E5 mask, the heat ceiling and the cycle runner all stop
   // acting -- it is a diagnostic and a fallback, not an operating mode.

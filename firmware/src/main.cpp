@@ -82,8 +82,16 @@ static void armWatchdog() {
 }
 
 void setup() {
+  // ABSOLUTE FIRST: bridge the CN2 pads, hardcoded, before Serial, before
+  // NVS, before everything. The bare-machine test proved the controller
+  // boots clean when the link is alive from its first millisecond and
+  // latches when it is not -- its panel-init window is shorter than our
+  // boot. Every microsecond of dark here risks the latch. Pins are the
+  // as-wired map (rxb=5 txb=6 txp=3 rxp=4); cn2::earlyBridge() re-applies
+  // from NVS moments later for non-default builds.
+  cn2::instantBridge();
   Serial.begin(115200);
-  cn2::earlyBridge();   // machine link first; every ms dark risks a latch
+  cn2::earlyBridge();   // NVS-aware re-apply; harmless repeat
   bootGuard();
   g_boot_ms = millis();
 

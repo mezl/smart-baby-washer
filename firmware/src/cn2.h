@@ -131,6 +131,7 @@ uint32_t profHist(int b);
 uint32_t profRxMax();
 void     profCause(uint8_t w, uint32_t &n, uint32_t &mx, uint32_t &tot_ms);
 bool     wire();
+void     instantBridge();  // hardcoded, first line of setup()
 void     earlyBridge();   // call FIRST in setup(): pads wired before anything slow          // pads bridged in the GPIO matrix (true wire)
 bool     wireSet(bool on);// false = LISTEN mode, nothing to bridge
 uint32_t lockedForMs();   // 0 = bit 6 clear; else how long it has been held
