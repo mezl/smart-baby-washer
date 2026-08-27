@@ -126,6 +126,21 @@ bool powerOff() {
   return call("{\"system\":{\"set_relay_state\":{\"state\":0}}}");
 }
 
+// A REAL power cycle -- possible only on the Shelly: toggle_after makes the
+// PLUG restore its own relay after hold_s, while this board is dead. On the
+// HS103 every mechanism for this was tested and failed (countdown cancelled
+// by relay writes, schedules never fire, one-rule table); do not offer it
+// there -- a Kasa "cycle" would strand the machine off.
+bool powerCycle(uint16_t hold_s) {
+  if (s_type != PLUG_SHELLY) { snprintf(s_err, sizeof(s_err), "cycle needs shelly"); return false; }
+  if (hold_s < 5) hold_s = 5;
+  if (hold_s > 600) hold_s = 600;
+  char path[80];
+  snprintf(path, sizeof(path), "/rpc/Switch.Set?id=0&on=false&toggle_after=%u", hold_s);
+  Serial.printf("[plug ] SELF POWER CYCLE: off now, plug restores in %u s\n", hold_s);
+  return shellyCall(path);
+}
+
 uint8_t plugType() { return s_type; }
 void setPlugType(uint8_t t) {
   s_type = t;

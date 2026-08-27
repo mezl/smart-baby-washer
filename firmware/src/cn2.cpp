@@ -2520,7 +2520,45 @@ static void resumeTick() {
     Serial.println("[cycle] auto-resumed after power cycle (self-contained)");
 }
 
+// Self-contained lockout recovery, at last on-chip. When the controller has
+// held bit 6 for SELFHEAL_AFTER_MS with the panel idle, power-cycle the
+// machine through the Shelly's self-restoring relay. NVS counts attempts
+// with escalating hold times; three strikes stops it (a latch that survives
+// a 180 s cut is a hardware condition no amount of cycling fixes -- see
+// docs/postmortem.md). The counter resets whenever the controller is seen
+// clear for ten minutes. Cycle progress survives via resumeTick().
+static uint32_t s_heal_clear_ms = 0;
+static void selfHealTick() {
+  static const uint16_t HOLD[3] = {120, 180, 300};
+  if (!(s_st_real & 0x40)) {
+    if (!s_heal_clear_ms) s_heal_clear_ms = millis() | 1;
+    else if (millis() - s_heal_clear_ms > 600000UL) {
+      Preferences p; p.begin("d8link", false);
+      if (p.getUChar("healn", 0)) p.putUChar("healn", 0);
+      p.end();
+      s_heal_clear_ms = millis() | 1;
+    }
+    return;
+  }
+  s_heal_clear_ms = 0;
+  if (lockedForMs() < 60000UL) return;          // give transients a minute
+  if (s_panel_b1 != 0) return;                  // never cut commanded loads... 
+  // ...except that a LOCKED controller ignores the panel anyway; a lock held
+  // this long with loads commanded still ends in the cut on the next pass
+  // once the panel gives up, which it does within seconds of seeing bit 6.
+  if (kasa::plugType() != kasa::PLUG_SHELLY) return;
+  Preferences p; p.begin("d8link", false);
+  uint8_t n = p.getUChar("healn", 0);
+  if (n >= 3) { p.end(); return; }              // breaker open
+  p.putUChar("healn", n + 1);
+  p.end();
+  Serial.printf("[heal ] lockout held %lus -- self power cycle #%u (hold %us)\n",
+                (unsigned long)(lockedForMs() / 1000), n + 1, HOLD[n]);
+  kasa::powerCycle(HOLD[n]);
+}
+
 void loop() {
+  selfHealTick();
   resumeTick();
   // Forwarding runs in relayTask(); the only work here is flushing the cycle
   // persistence record, so the flash writes happen in this task, never there.

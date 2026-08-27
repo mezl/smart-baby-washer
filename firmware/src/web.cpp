@@ -1813,6 +1813,10 @@ void begin() {
     String extra = "";
     if (s_server.hasArg("test"))
       extra = ",\"reachable\":" + String(kasa::reachable() ? "true" : "false");
+    if (s_server.hasArg("cycle_s")) {
+      const uint16_t hold = (uint16_t)s_server.arg("cycle_s").toInt();
+      extra += ",\"cycling\":" + String(kasa::powerCycle(hold) ? "true" : "false");
+    }
     if (s_server.hasArg("cycle")) {
       // Never cut mains to a machine that is doing something.
       if (cn2::panelB1() != 0 || cn2::cycleState() == 1) {

@@ -13,6 +13,7 @@ namespace kasa {
 void        begin();                  // loads the plug address from NVS
 enum { PLUG_KASA = 0, PLUG_SHELLY = 1 };
 void        setPlug(const char *ip);
+bool        powerCycle(uint16_t hold_s);   // Shelly only: off, self-restore
 uint8_t     plugType();
 void        setPlugType(uint8_t t);
 const char *plugIp();
