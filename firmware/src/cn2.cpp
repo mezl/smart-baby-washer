@@ -400,9 +400,14 @@ void earlyBridge() {
   const int8_t txb = (int8_t)p.getChar("ptxb", PIN_TX_BOARD);
   const int8_t txp = (int8_t)p.getChar("ptxp", PIN_TX_PANEL);
   const int8_t rxp = (int8_t)p.getChar("prxp", PIN_RX_PANEL);
-  const bool   w   = p.getBool("wire", true);
   p.end();
-  if (!w || rxb < 0 || txb < 0 || txp < 0 || rxp < 0) return;
+  // UNCONDITIONAL (was gated on the wire preference): this bridge only covers
+  // the boot window -- openPorts() reclaims the pads for the UARTs seconds
+  // later, so a CPU-relay board still boots into CPU relay. Gating it left
+  // CPU-mode boots dark for ~2 s, and a failed OTA's restart was enough for
+  // the controller to starve and latch E5 (observed 2026-08-26). Only a
+  // saved LISTEN pin map (tx = -1) skips it, because LISTEN must never drive.
+  if (rxb < 0 || txb < 0 || txp < 0 || rxp < 0) return;
   gpio_ll_input_enable(&GPIO, (uint32_t)rxb);
   gpio_ll_input_enable(&GPIO, (uint32_t)rxp);
   esp_rom_gpio_connect_in_signal(rxb, SIG_IN_FUNC_97_IDX, false);

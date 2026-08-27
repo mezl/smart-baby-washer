@@ -96,7 +96,9 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
  body.wait #busy{width:100%}
 </style>
 <div id=busy></div>
-<h1>MOMCOZY D8</h1>
+<h1>MOMCOZY D8 <a href="/dev" style="float:right;font-size:12px;font-weight:400;color:#8aa;text-decoration:none;margin-top:6px">dev &rarr;</a></h1>
+<style>.sm{font:11px ui-monospace,monospace;background:#22303c;color:#cde;border:1px solid #45586a;border-radius:6px;padding:5px 9px;margin-left:4px}.sm.on{background:#1b6ec2;border-color:#57a6ff;color:#fff}</style>
+<div id=sys style="font:11px ui-monospace,Menlo,monospace;color:#8aa;margin:-4px 0 8px 2px">connecting&hellip;</div>
 
 <div class=card id=hdr>
   <div class=state id=st>&hellip;</div>
@@ -120,6 +122,12 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
   <h1 style="margin:0 0 2px">LOADS &mdash; DIRECT CONTROL</h1>
   <div class=sub id=loadsub></div>
   <div class=loads id=loads></div>
+  <div style="margin-top:10px;font:11px ui-monospace,Menlo,monospace;color:#8aa">LID OVERRIDE
+    <span style="float:right">
+      <button class=sm id=lidm0 onclick="lidset(0)">real</button>
+      <button class=sm id=lidm1 onclick="lidset(1)">force closed</button>
+      <button class=sm id=lidm2 onclick="lidset(2)">force open</button>
+    </span></div>
   <button class=go id=lflushb onclick=lflush() style="background:#123a5c;border-color:#1b6ec2;color:#cfe6ff;margin-top:10px">FLUSH (intake + drain)</button>
   <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:8px">RELEASE ALL</button>
   <button class=go id=lcut style="background:#5c1d1d;border-color:#f85149;color:#ffecec;margin-top:8px;display:none">CUT MAINS</button>
@@ -189,16 +197,34 @@ function lsync(){
   return post('/api/mode_ovr?'+modeq())
     .then(()=>post('/api/panel_ovr?clr='+(LSET?'FF':'0')+'&set='+LSET.toString(16)));
 }
+let LIDM=0;
+function lidset(m){
+  LIDM=m; paintLid();
+  post('/api/lid?m='+m);
+}
+function paintLid(){
+  for(let i=0;i<3;i++){ const el=$('lidm'+i); if(el) el.classList.toggle('on', LIDM===i); }
+}
 function lbit(k){
   LSET ^= (1<<k);
   // dropping the intake by hand while flushing must go through the proper
   // stop sequence -- see stopFlush() for why a plain release is not enough
   if(k===5 && !(LSET&0x20) && FLUSHON){ stopFlush(); return; }
+  paintLoads();          // tap feedback now; the poll fills in RUNNING later
   lsync();
+}
+// Optimistic repaint from local override state only -- machine truth
+// (running/forwarded) arrives with the next poll and repaints again.
+function paintLoads(){
+  document.querySelectorAll('#loads .lb').forEach((el,idx)=>{
+    const k=LOADS[idx][0];
+    el.classList.toggle('on', !!(LSET>>k&1));
+  });
 }
 function lflush(){ FLUSHON ? stopFlush() : startFlush(); }
 function startFlush(){
   FLUSHON=1; LSET |= 0x22;
+  paintLoads();
   lsync();
   $('lflushb').classList.add('on');
   $('lflushb').textContent='FLUSHING — tap to stop';
@@ -212,13 +238,14 @@ function stopFlush(){
   // running with no command able to stop it short of a power cycle --
   // learned live, with the tank auto-topping the whole time.
   FLUSHON=0; LSET &= ~0x20; LSET |= 0x02;
+  paintLoads();
   post('/api/mode_ovr?b2=&b3=')
     .then(()=>post('/api/panel_ovr?clr=FF&set='+LSET.toString(16)));
   $('lflushb').classList.remove('on');
   $('lflushb').textContent='draining\u2026';
   $('lflushb').disabled=true;
   setTimeout(()=>{
-    LSET &= ~0x02; lsync();
+    LSET &= ~0x02; paintLoads(); lsync();
     $('lflushb').disabled=false;
     $('lflushb').textContent='FLUSH (intake + drain)';
   }, 20000);
@@ -340,11 +367,35 @@ function draw(a){
 // of the first. A plain setInterval did, and the pile-up is what made buttons
 // stop answering until the page was reloaded.
 let TT=null;
+let SYSOK=0;
+function wifiIcon(rssi){
+  // three arcs + dot, lit by strength: >-60 strong, >-70 ok, >-80 weak
+  const lv = rssi>-60?3 : rssi>-70?2 : rssi>-80?1 : 0;
+  const c = i => i<=lv ? '#4c8' : '#39424d';
+  return '<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:-1px">'
+    +'<path d="M12 17.5 a1.8 1.8 0 1 0 .01 0" fill="'+c(1)+'"/>'
+    +'<path d="M6.5 12.5 a8 8 0 0 1 11 0" stroke="'+c(2)+'" stroke-width="2.4" fill="none"/>'
+    +'<path d="M2.5 8 a14 14 0 0 1 19 0" stroke="'+c(3)+'" stroke-width="2.4" fill="none"/>'
+    +'</svg>';
+}
+function sysline(a){
+  const up=a.uptime_s|0, h=Math.floor(up/3600), m=Math.floor(up%3600/60);
+  if(typeof a.lid_mode==='number' && !document.activeElement.id.startsWith('lidm')){ LIDM=a.lid_mode; paintLid(); }
+  $('sys').innerHTML =
+    '<span style="color:#4c8">&#9679; online</span> &middot; v'+(a.fw||'?')
+    +' &middot; '+wifiIcon(a.rssi|0)+' <span title="'+a.rssi+' dBm">'+(a.rssi|0)+'</span>'
+    +' &middot; up '+(h?h+'h':'')+m+'m'
+    +' &middot; heap '+Math.round((a.heap|0)/1024)+'k';
+}
+function sysdown(){
+  $('sys').innerHTML='<span style="color:#e66">&#9679; unreachable</span> &middot; retrying&hellip;';
+}
 async function tick(){
   clearTimeout(TT);
   if(!document.hidden){
     const r=await hit('/api/app');
-    if(r) try{ draw(await r.json()) }catch(e){}
+    if(r){ try{ const a=await r.json(); draw(a); sysline(a); SYSOK=1 }catch(e){} }
+    else if(SYSOK!==2){ sysdown(); SYSOK=2 }
   }
   TT=setTimeout(tick, document.hidden?4000:1000);
 }
@@ -458,7 +509,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
    h1{font-size:14px}
  }
 </style>
-<h1>Momcozy D8 &mdash; CN2 <span class=lbl>v)HTML" FW_VERSION R"HTML(</span> <span id=hdr class=mut></span></h1>
+<h1>Momcozy D8 &mdash; CN2 <span class=lbl>v)HTML" FW_VERSION R"HTML(</span> <span id=hdr class=mut></span> <a href="/" style="float:right;font-size:12px;color:#9cf;text-decoration:none">&larr; app</a></h1>
 <div id=busy></div>
 
 <div class=cols id=cols>
@@ -1210,6 +1261,11 @@ const B5_TGT=[0x2A,0x07];        // 20 counts, ~10 s of water, the smallest the 
 function b1(k,mode){
  const m=1<<k; let c=CUR.p1_clr|0, v=CUR.p1_set|0;
  if(mode==0){c&=~m; v&=~m} else if(mode==1){v|=m; c&=~m} else {c|=m; v&=~m}
+ // Paint the tap NOW from local state; the next poll reconciles the
+ // panel/->ctrl columns. Waiting for the round trip made the buttons feel
+ // dead -- the load was already running before the highlight moved.
+ CUR.p1_clr=c; CUR.p1_set=v;
+ $('b1tbl').innerHTML=b1tbl(CUR);
  post('/api/panel_ovr?clr='+c.toString(16)+'&set='+v.toString(16));
  if(k===5){
    if(mode==1) modeo(B5_TGT[0].toString(16),B5_TGT[1].toString(16));
@@ -1992,6 +2048,10 @@ void begin() {
     j += ",\"locked_ms\":" + String(cn2::lockedForMs());
     j += ",\"link_err\":" + String(cn2::frameBad(0) + cn2::frameBad(1));
     j += ",\"uptime_s\":" + String(millis() / 1000);
+    j += ",\"fw\":\"" FW_VERSION "\"";
+    j += ",\"rssi\":" + String(WiFi.RSSI());
+    j += ",\"lid_mode\":" + String((int)cn2::lidMode());
+    j += ",\"heap\":" + String(ESP.getFreeHeap());
     j += ",\"pc\":" + String(cn2::pcycleActive() ? "true" : "false");
     if (cn2::pcycleActive()) {
       j += ",\"pc_elapsed\":" + String(cn2::pcycleElapsedS());

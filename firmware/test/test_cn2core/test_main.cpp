@@ -1132,8 +1132,113 @@ static void test_framepos_alias_detected_and_recovered(void) {
   TEST_ASSERT_FALSE(p.hunting);
 }
 
+// ---- E5 model: the controller latches when valid panel frames stop --------
+//
+// Every E5 this firmware ever CAUSED reduced to one mechanism: the stream of
+// checksum-valid panel frames reaching the controller was interrupted. The
+// model below encodes that: feed it what the firmware EMITS; it latches after
+// E5_LATCH consecutive invalid frames, and once latched it stays latched --
+// exactly like the field behavior (a single leaked frame latched the panel;
+// firmware 1.4.0's stale checksum latched the controller within seconds).
+// These tests first REPRODUCE historical E5 bugs against the model, then
+// prove the current pipeline cannot trigger it. Any future change to the
+// emit path that reintroduces one of these classes fails here on the host,
+// before it ever reaches the machine.
+struct E5Model {
+  static const int E5_LATCH = 5;    // consecutive bad/absent frames to latch
+  int badrun = 0; bool latched = false;
+  void frame(const uint8_t *f, int n) {          // one emitted frame
+    uint8_t x = 0; for (int i = 0; i < n; i++) x ^= f[i];
+    if (n == 5 && f[0] == 0xAA && x == 0) badrun = 0;
+    else if (++badrun >= E5_LATCH) latched = true;
+  }
+  void silence() {                                // a frame period with no frame
+    if (++badrun >= E5_LATCH) latched = true;
+  }
+};
+
+// Reproduction: firmware 1.4.0 rewrote a byte but recomputed the checksum
+// from an enumerated override list the new rewrite had not joined -- frames
+// went out with the ORIGINAL checksum over EDITED bytes. The model must
+// latch on that stream: this is the unit test that "reproduces E5".
+static void test_e5_repro_stale_checksum_latches(void) {
+  E5Model e5;
+  for (int r = 0; r < 8; r++) {
+    uint8_t f[5] = {0xAA, 0x20, 0x00, 0x00, 0xAA};  // b1 edited, checksum stale
+    e5.frame(f, 5);
+  }
+  TEST_ASSERT_TRUE(e5.latched);
+}
+
+// Reproduction: the desync alias emitted position-shifted rewrites -- valid-
+// looking garbage. Any stream that is not checksum-valid panel frames latches.
+static void test_e5_repro_desync_garbage_latches(void) {
+  E5Model e5;
+  for (int r = 0; r < 8; r++) {
+    uint8_t f[5] = {0x00, 0x00, 0x00, 0xAA, 0xAA};  // shifted by the alias
+    e5.frame(f, 5);
+  }
+  TEST_ASSERT_TRUE(e5.latched);
+}
+
+// Reproduction: forwarding simply stopping (wedged relay, OTA gap) latches.
+static void test_e5_repro_silence_latches(void) {
+  E5Model e5;
+  for (int r = 0; r < 6; r++) e5.silence();
+  TEST_ASSERT_TRUE(e5.latched);
+}
+
+// Prevention: the CURRENT emit pipeline -- FramePos indexing + FrameTx
+// checksum decision -- must produce a stream the model never latches on,
+// including while a rewrite is active (the exact 1.4.0 scenario, done right).
+static void test_e5_current_pipeline_never_latches(void) {
+  cn2core::FramePos pos; cn2core::FrameTx tx; E5Model e5;
+  const uint8_t idle[5] = {0xAA, 0x00, 0x00, 0x00, 0xAA};
+  uint8_t out[5]; int oi = 0;
+  for (int r = 0; r < 40; r++) {
+    for (int k = 0; k < 5; k++) {
+      const uint8_t b = idle[k];
+      const uint8_t i = pos.feed(b);
+      if (i == 0) tx.start(b);
+      uint8_t w = b;
+      if (r >= 10 && r < 30 && i == 1) w = 0x22;   // live rewrite mid-stream
+      w = tx.feed(b, w);
+      pos.advance();
+      out[oi++] = w;
+      if (oi == 5) { e5.frame(out, 5); oi = 0; }
+    }
+  }
+  TEST_ASSERT_FALSE(e5.latched);
+}
+
+// Prevention: a lost byte (the alias) must not keep the stream invalid long
+// enough to latch. FramePos recovery declares a hunt within 3 aliased frames
+// and passes bytes through UNREWRITTEN while hunting -- pass-through of real
+// panel frames is valid traffic, so the model's bad run stops growing.
+static void test_e5_alias_recovery_beats_the_latch(void) {
+  cn2core::FramePos pos; E5Model e5;
+  const uint8_t idle[5] = {0xAA, 0x00, 0x00, 0x00, 0xAA};
+  for (int k = 0; k < 5; k++) { pos.feed(idle[k]); pos.advance(); }
+  for (int k = 0; k < 4; k++) { pos.feed(idle[k]); pos.advance(); }  // byte lost
+  int aliased = 0;
+  while (!pos.hunting) {                       // aliased frames: rewrites would
+    for (int k = 0; k < 5; k++) { pos.feed(idle[k]); pos.advance(); }
+    e5.frame(idle, 0);                         // model as invalid (worst case)
+    TEST_ASSERT_TRUE_MESSAGE(++aliased < E5Model::E5_LATCH,
+                             "alias survived long enough to latch E5");
+  }
+  // hunting: pure pass-through of the REAL frames = valid traffic again
+  for (int r = 0; r < 3; r++) e5.frame(idle, 5);
+  TEST_ASSERT_FALSE(e5.latched);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
+  RUN_TEST(test_e5_repro_stale_checksum_latches);
+  RUN_TEST(test_e5_repro_desync_garbage_latches);
+  RUN_TEST(test_e5_repro_silence_latches);
+  RUN_TEST(test_e5_current_pipeline_never_latches);
+  RUN_TEST(test_e5_alias_recovery_beats_the_latch);
   RUN_TEST(test_framepos_survives_clean_stream);
   RUN_TEST(test_framepos_single_corrupt_byte_no_reset);
   RUN_TEST(test_framepos_alias_detected_and_recovered);
