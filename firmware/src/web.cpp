@@ -132,7 +132,7 @@ static const char APP_HTML[] PROGMEM = R"HTML(<!doctype html>
     </span></div>
   <button class=go id=lflushb onclick=lflush() style="background:#123a5c;border-color:#1b6ec2;color:#cfe6ff;margin-top:10px">FLUSH (intake + drain)</button>
   <button class=go id=lrel style="background:#2a3038;border-color:#4a5462;color:#dde;margin-top:8px">RELEASE ALL</button>
-  <button class=go id=lcut style="background:#5c1d1d;border-color:#f85149;color:#ffecec;margin-top:8px;display:none">CUT MAINS</button>
+  <button class=go id=lcut style="background:#5c1d1d;border-color:#f85149;color:#ffecec;margin-top:8px;display:none">POWER</button>
   <div class=warn2 id=cutnote style="display:none">Cuts power at the smart plug &mdash;
     the only way to stop a load the controller has latched on. <b>The machine stays
     off.</b> This board is powered by the plug, so it cannot switch itself back on
@@ -276,15 +276,23 @@ $('lrel').onclick=()=>{
 
 // Cutting mains needs two taps. It is the one control here that the machine
 // cannot undo -- and neither can this board, which the plug also powers.
-let CUTARM=0;
+let CUTARM=0, PCYC=false;
+function cutLabel(){ return PCYC ? 'POWER CYCLE (off 8 s, auto-restore)' : 'CUT MAINS'; }
 $('lcut').onclick=()=>{
   if(!CUTARM){
-    CUTARM=1; $('lcut').textContent='TAP AGAIN TO CUT MAINS';
-    setTimeout(()=>{CUTARM=0;$('lcut').textContent='CUT MAINS'},4000);
+    CUTARM=1; $('lcut').textContent=PCYC?'TAP AGAIN TO POWER CYCLE':'TAP AGAIN TO CUT MAINS';
+    setTimeout(()=>{CUTARM=0;$('lcut').textContent=cutLabel()},4000);
     return;
   }
-  CUTARM=0; $('lcut').textContent='cutting...';
-  post('/api/kasa?cycle=1');
+  CUTARM=0;
+  if(PCYC){
+    $('lcut').textContent='cycling\u2026 back in ~20 s';
+    post('/api/kasa?cycle_s=8');
+    setTimeout(()=>{$('lcut').textContent=cutLabel()},25000);
+  }else{
+    $('lcut').textContent='cutting...';
+    post('/api/kasa?cycle=1');
+  }
 };
 function drawLoads(a){
   LSET = a.p1_set|0;
@@ -296,6 +304,16 @@ function drawLoads(a){
          + `<small>${b} &middot; ${live?'RUNNING':'off'}</small></div>`;
   }).join('');
   const hasplug = !!(a.plug && a.plug.length);
+  if(hasplug && typeof a.plug_cycle==='boolean' && PCYC!==a.plug_cycle && !CUTARM){
+    PCYC=a.plug_cycle; $('lcut').textContent=cutLabel();
+    $('cutnote').innerHTML = PCYC
+      ? 'A real power cycle: the Shelly opens its relay and restores it by '
+        +'itself 8 s later \u2014 this board reboots with it and resumes any '
+        +'interrupted ESP cycle. Lockouts also self-heal on-chip (escalating '
+        +'holds, 3-strike stop).'
+      : 'Cuts power at the smart plug \u2014 the machine STAYS off; restore it '
+        +'in the plug\u2019s app.';
+  }
   $('lcut').style.display = hasplug ? '' : 'none';
   $('cutnote').style.display = hasplug ? '' : 'none';
   $('loadsub').innerHTML = a.locked
@@ -2074,6 +2092,7 @@ void begin() {
     j += ",\"p1_clr\":" + String(cn2::panelClr());
     j += ",\"locked\":" + String((cn2::statusReal() & 0x40) ? "true" : "false");
     j += ",\"plug\":\"" + String(kasa::plugIp()) + "\"";
+    j += ",\"plug_cycle\":" + String(kasa::plugType() == kasa::PLUG_SHELLY ? "true" : "false");
     j += ",\"wire\":" + String(cn2::wire() ? "true" : "false");
     j += ",\"locked_ms\":" + String(cn2::lockedForMs());
     j += ",\"link_err\":" + String(cn2::frameBad(0) + cn2::frameBad(1));
