@@ -199,3 +199,36 @@ step): USB-C into the XIAO.
 Note: with the module inline and unpowered the panel<->controller link
 is SEVERED (bridge exists only while the ESP runs). Machine unusable
 until physical access; panel-direct-to-CN2 restores standalone use.
+
+
+## Update 2026-08-28 (later): machine WORKS with the "dead" module inline -- diagnosis nearly closed
+
+Kai reports the machine working again, module untouched, ESP still absent
+from the network. This overturns the "chip not booting" call: the link
+physically routes through the module, so a working machine PROVES the
+bridge is forwarding, i.e. the CPU boots and runs instantBridge (first
+instruction, register-state only, ~uA). Only the RADIO is dead.
+
+Coherent single-fault story, now spanning every observation:
+degrading 5V feed (CN2 pin-4 rail / regulator). Quiescent CPU + GPIO
+bridge survive; WiFi startup bursts (~300 mA) collapse the rail.
+- Pre-08-26: rail healthy -> everything worked.
+- 08-26 onward: rail sags during WiFi startup -> link disturbed at
+  t~5.1 s after boot (exactly the radio-burst window) -> controller
+  latches E5 every boot.
+- 08-28: degradation progressed; WiFi cannot start at all (possibly a
+  brownout-reset loop; bridge re-establishes within ms each pass) ->
+  module offline, machine runs CLEAN because the disturbance source
+  (radio) never comes up.
+
+The module has degraded itself into the "dumb wire, no radio" arm of the
+experiment ladder -- and the machine running clean in that arm points at
+WiFi power draw on the shared rail, not the data path and not firmware.
+
+Confirmation + fix in one step (unchanged, USB split-power): feed the
+XIAO from a USB-C charger. Expected: WiFi returns AND E5 stays away.
+If E5 returns with WiFi on USB power, this story is falsified and the
+shifter/analog branch reopens.
+
+Interim state: machine usable from the panel; no web UI / HA / logging
+until the module gets USB power.
