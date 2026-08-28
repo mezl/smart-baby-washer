@@ -87,7 +87,7 @@ void setup() {
   // boots clean when the link is alive from its first millisecond and
   // latches when it is not -- its panel-init window is shorter than our
   // boot. Every microsecond of dark here risks the latch. Pins are the
-  // as-wired map (rxb=5 txb=6 txp=3 rxp=4); cn2::earlyBridge() re-applies
+  // as-built map (rxb=5 txb=6 txp=3 rxp=4), now also the config.h defaults;
   // from NVS moments later for non-default builds.
   cn2::instantBridge();
   Serial.begin(115200);

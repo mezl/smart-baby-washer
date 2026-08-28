@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION  "1.17.7"
+#define FW_VERSION  "1.17.8"
 
 
 // ---- Network identity ------------------------------------------------------
@@ -61,10 +61,16 @@
 //
 // These are only the DEFAULTS. /api/detect writes a discovered map to NVS, and
 // a saved map wins over anything here.
-#define PIN_RX_BOARD    3     // D1  <- controller pin 1  ch1  (controller TX)
-#define PIN_TX_BOARD    4     // D2  -> controller pin 2  ch2  (controller RX)
-#define PIN_TX_PANEL    5     // D3  -> panel pin 1       ch3  (panel RX)
-#define PIN_RX_PANEL    6     // D4  <- panel pin 2       ch4  (panel TX)
+// AS-BUILT map for THIS module (rewired 2026-08-25; differs from
+// docs/build.md, which describes the original layout). Field-proven twice:
+// frames decode only on rxb=5/rxp=4 (zero frames on the old defaults after
+// an NVS wipe), and an intake command emitted on txb=6 moved real water.
+// Keep these matching the copper -- a default/physical mismatch means an
+// NVS wipe silently kills the link.
+#define PIN_RX_BOARD    5     // <- controller output
+#define PIN_TX_BOARD    6     // -> controller input
+#define PIN_TX_PANEL    3     // -> panel input
+#define PIN_RX_PANEL    4     // <- panel output
 
 // ---- flow meter, J3 on the carrier board -----------------------------------
 // The board splices the FV signal line the same way CN2 is spliced: cut it,
