@@ -172,3 +172,30 @@ Each rung was TESTED, not argued (details in postmortem/boot-review):
 
 Good luck. The machine's owner wants a washer, not a mystery — if experiment
 1 fixes it, stop there and let the analog question rest.
+
+
+---
+
+## Update 2026-08-28: module went fully dark
+
+The ESP died in place overnight (last alive 2026-08-27 after the 1.17.8
+flash, link healthy). Evidence: never associates with WiFi (ARP
+incomplete), absent from a full /24 sweep, machine standby draw normal
+(1.8 W). Not recoverable remotely: 3 power cycles + 30 s cut + 5-min
+cold cut all failed. Chip is not booting.
+
+Significance: strongly supports the hardware-degradation branch. A
+failing power path (CN2 pin-4 rail / regulator) explains BOTH the
+E5-at-boot onset on 08-26 (rail sag disturbing the link during boot)
+AND the final no-boot state -- one fault, progressing.
+
+Decisive test unchanged (= ranked experiment #1, now also the recovery
+step): USB-C into the XIAO.
+- Boots on USB -> rail/feed dead -> E5 root cause likely found; run the
+  module on USB power permanently.
+- Dead on USB -> board failed -> replace XIAO, `pio run -t upload`,
+  pin map 5/6/3/4 is the compiled default since 1.17.8.
+
+Note: with the module inline and unpowered the panel<->controller link
+is SEVERED (bridge exists only while the ESP runs). Machine unusable
+until physical access; panel-direct-to-CN2 restores standalone use.
