@@ -1,0 +1,174 @@
+# HANDOVER: Momcozy D8 "unit 2" E5-at-boot — for the next agent
+
+Written 2026-08-27 by the outgoing agent after a three-day investigation that
+fixed everything except this. Read `postmortem.md` and `boot-review.md` after
+this file; they carry the full evidence chains. Trust the measurements in
+this document; distrust every narrative, including mine.
+
+## 0. The one-line problem
+
+Since Aug 26 ~17:45, the washer's controller latches status **bit 6** (panel
+shows **E5**) ~5 s after every power-on **when the ESP32 interceptor module
+is inline**, and boots clean when the panel cable is connected directly
+(bare). The machine worked perfectly with the same module, same firmware,
+same NVS at 15:31 the same day. Nothing that is constant across that
+boundary can be the cause; everything software-side has been proven constant
+or was wiped.
+
+## 1. System map
+
+- **Machine**: Momcozy D8 bottle washer, later touch-panel revision.
+  Controller board talks to front panel over `CN2` (4-pin: GND, +5V, two
+  UART lines, 9600 8N1). Frame formats in `docs/protocol.md`.
+- **Module**: XIAO ESP32-C3 + 4-ch BSS138 shifter, INLINE on CN2 (cable cut,
+  both halves land on the module). Powered FROM CN2 pin 4 → it reboots with
+  the machine. **As-wired pin map: rxb=5 txb=6 txp=3 rxp=4** (differs from
+  docs/build.md which describes 3/4/5/6 — the owner rebuilt it Aug 25; NVS
+  map matches physical, verified: frames decode on 5/4, dead on 3/6).
+  IP `192.168.14.13`, mDNS `d8-sniffer.local`. Firmware in this repo,
+  `firmware/`; deployed 1.17.7. OTA: `POST /update?key=<OTA_PASSWORD>` —
+  password in `firmware/include/secrets.h` (gitignored, on the dev box).
+- **Smart plug**: Shelly Plug US **Gen4** `192.168.14.95`, name "D8 Washer",
+  `initial_state=on`. HTTP RPC, no auth. Real power metering. `toggle_after`
+  gives a true self-restoring power cycle — `tools/shelly.py`
+  (status/on/off/cycle) or `POST <esp>/api/kasa?cycle_s=N`.
+- **HA**: `homeassistant.local:8123` (ssh alias `ha`, key auth, /config).
+  Shelly integration live; `packages/momcozy_d8.yaml` REST-polls the ESP.
+  Dashboard tab: `/dashboard-cradlewise/d8`. NO daemons — owner directive:
+  ESP32 must be self-contained; HA is display-only.
+- **Repos**: `~/software/d8-smart` (private, full history) and
+  `~/software/smart-baby-washer` (public mirror). Firmware source of truth
+  the owner edits from: `~/software/momcozy_d8/cn2sniffer`.
+
+## 2. Owner directives (standing, do not violate)
+
+- CPU relay is the operating mode; NEVER auto-switch to wire mode. Wire is a
+  diagnostic, on explicit request. (Both persist via NVS `wire`.)
+- No PC/HA daemons in the run/recovery path.
+- Self-heal (`/api/heal`) is opt-in OFF; its strike counter resets only by
+  human command. It once power-cycled the machine all night — see §6.
+- Repos stay private until the owner flips them; never commit secrets.
+
+## 3. Tooling you have
+
+- ESP API: `/api/status` (everything), `/api/frames?n=` (timestamped ring,
+  ~60 s deep), `/api/hist` (dedup frame history; array is oldest→newest,
+  `first/last` = frames-ago — MISREAD TWICE, cost hours), `/api/graph`
+  (temp/flow/power trends), `/api/panel_ovr`, `/api/mode_ovr`, `/api/wire`
+  (GET shows live+stored), `/api/pinmap`, `/api/kasa` (`type=shelly`,
+  `test`, `cycle_s`), `/api/nvswipe?confirm=yes`, `/api/heal`, `/api/prof`,
+  `/api/wirecheck` (edge counts on all four pads — proves conduction).
+- `firmware/minimal/main_min.cpp` (env `c3min`): bridge+WiFi+OTA only, the
+  exoneration instrument. NOTE: no WiFi reconnect — if a boot misses
+  association it stays dark; power cycle again.
+- OTA over the flaky link: fresh-boot trick — Shelly `toggle_after=6`, wait
+  for `/api/version`, sleep 10–12 s, then upload full speed. Usually lands
+  within 4 rounds. Uploads die if attempted on an "aged" link.
+- Host tests: `pio test -e native` (111 green, includes the E5Model suite
+  that reproduces every firmware-caused E5 class and forbids regressions).
+
+## 4. Precise symptom (from frame captures — `captures/boot-frames-e5-*.txt`)
+
+- Controller boots **clear** (byte3=0x00), replies to the panel's 200 ms
+  polls within 3–12 ms, checksums perfect, then latches byte3=0x40 at
+  **t≈5.1 s** between two byte-identical polls.
+- Controller frame **byte 5**: healthy era idles `0x09` (0b1001); broken era
+  `0x0A/0x0B` (bit1 ON; bit0 flickers). It initializes ~0x00→0x0A at
+  t≈0.7 s. It has read steady-`09` for stretches (once 5+ minutes) and the
+  latch STILL occurred on the next boot — so byte5-bit1 correlates but the
+  gate may sample earlier than any window we catch, or byte5 is not the gate.
+- The latch survives cuts of 5 s–10 min. Historical cut data (CSV in
+  `captures/`): during Aug-23-era locks, 60 s cuts 0/5, 120 s 3/5, 180 s 2/2
+  — but the CURRENT condition relatches at every boot regardless.
+- A latched controller ignores external load commands (proven: intake+target
+  → zero flow; 60 s wash+heat → 0.0 °C rise) but its frames keep flowing.
+
+## 5. The exoneration ladder — do not re-climb it
+
+Each rung was TESTED, not argued (details in postmortem/boot-review):
+1. Firmware logic — 20-line minimal image (silicon bridge from first app
+   instruction, no logic in data path): **latches**.
+2. Image size / boot speed — 23 % smaller, zero init: latches.
+3. Every firmware version, incl. rebuilt same-day-working 1.16.3: latches.
+4. NVS — full wipe to virgin + minimal re-provision: latches.
+5. Pin map — re-verified empirically both ways (decode dead on 3/4/5/6,
+   alive on 5/6/3/4).
+6. GPIO10 boot drive (real bug, fixed 1.17.3 — wsr pin untouched when off):
+   not the cause.
+7. Frame content/timing — byte- and ms-identical to working logs.
+8. Masks (`e5filter`), wire vs CPU, boot-bridge timing (t≈300 ms): no effect.
+9. ROM-stage pad analysis (JTAG pulls on GPIO4/5/6): cannot pull a line low;
+   constant since day one.
+10. **Bare machine: clean** (owner-run, repeated).
+
+## 6. Open contradictions — the real leads
+
+- **The overnight 38 W**: Aug 26 23:00→Aug 27 08:50, HA's Shelly power
+  history shows a flat ~38 W pump-class load for 7.6 h starting AT a boot,
+  during virgin-NVS **wire mode** (ESP TX physically detached) with the
+  panel E5-latched. Owner states the controller never self-starts loads on
+  boot. Then WHO drove 38 W? Unresolved. Suggest: capture what a LATCHED
+  panel actually transmits (nobody ever verified it stays idle in all latch
+  entry paths), and what byte1 the controller sees at such a boot.
+- **The Wednesday 15:31→17:45 differential**: that afternoon contained heavy
+  cycle testing (heat, vibration, dozens of hard power cycles) and a flush
+  bug that ran water ~2 min (see postmortem). No code change survives the
+  elimination ladder. Something PHYSICAL changed. Candidates, in my order:
+  BSS138 channel stressed/failing at analog margins; solder joint; CN2
+  connector seating; controller input stage damaged; and (weakly) some
+  panel/controller NVM state that bare-boot masks — though bare-clean argues
+  against controller NVM.
+- **byte5 semantics**: never decoded. Bits 0/1 swap between healthy/broken;
+  a new value 0x06 appeared once after the pump-night. Manipulating lid,
+  tank, buttons moved nothing. Worth mapping properly (drive each machine
+  input while streaming `fb`).
+
+## 7. Ranked next experiments
+
+1. **USB split-power test** (decisive, cheap; owner has the module
+   accessible): USB-C charger into the XIAO → ESP never reboots with the
+   machine → bridge alive from the controller's first microsecond → Shelly-
+   cycle the machine. Clean boot ⇒ ROM dark-window timing was the cause AND
+   the permanent fix (leave USB in). Latch ⇒ analog presence confirmed.
+   Note XIAO diode-ORs USB and 5 V rail; dual feed is safe.
+2. **Multimeter on the shifter during a latch** (HV1..4 idle ≈5 V via 10 k
+   pull-ups; a dead channel reads floating/low; wiggle-test joints).
+3. **Latched-panel transmission capture**: `/api/frames` while the panel
+   displays E5 through a fresh latch — verify it truly idles 0x00 in every
+   entry path (bears on the 38 W mystery).
+4. **Scope/logic-analyzer on CN2 at the controller connector** during a
+   module boot vs a bare boot — the only view that sees what the
+   controller's input pin actually receives during t=0–5 s.
+5. If all else stalls: swap the BSS138 board (~$1) on spec; it is the
+   component most exposed to that afternoon's stress and least observable.
+
+## 8. Lessons paid for in hours — read before acting
+
+- `HardwareSerial::setPins(samePins)` is a silent no-op; the GPIO-matrix
+  bridge steals pads invisibly to periman. Reconnect TX signals explicitly
+  (see wireSet(false)). This one cost 12 hours of ghost-hunting.
+- Test UI through a BROWSER, not curl: the board serves ONE http client;
+  parallel fetches race and the loser is dropped (chain posts).
+- The shared `Preferences s_prefs` handle breaks after any begin()/end()
+  pair elsewhere; use local handles for every persist (several fixed).
+- A 0xFF flush is controller-LATCHED: stopping it = intake off, drain held
+  ~20 s, then release. Plain release leaves water running.
+- FramePos alias: idle-stream byte loss self-sustains and XOR-validates;
+  detection needs the byte-1 invariant + wire-gap re-lock (in cn2core, host
+  tested).
+- `pkill -f <pattern>` matching your own command line kills your own shell.
+- Owner's instincts have repeatedly out-diagnosed instrument readings.
+  When they say "not X", retire X quickly and retest assumptions instead.
+
+## 9. Artifact index
+
+- `docs/postmortem.md` — full multi-day evidence narrative + retractions
+- `docs/boot-review.md` — instruction-level boot audit
+- `captures/boot-frames-e5-20260826.txt` — the latch, frame by frame
+- `captures/unit2-firstcycle-*` — healthy-era reference traffic
+- `captures/unlock-attempts.csv`, `ha-*-final.*` — cut/latch field data
+- `firmware/test/test_cn2core/` — 111 host tests incl. the E5Model suite
+- HA history: `sensor.d8_washer_d8_washer_power` — the overnight 38 W curve
+
+Good luck. The machine's owner wants a washer, not a mystery — if experiment
+1 fixes it, stop there and let the analog question rest.
