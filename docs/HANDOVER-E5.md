@@ -317,3 +317,57 @@ Remaining ranked experiments: unchanged, minus WiFi. The fault is a
 5-second timed decision by the controller that only occurs with the module
 electrically inline, so the next evidence must come from a meter or a
 scope on the CN2 lines, not from firmware.
+
+
+## 2026-08-28 (night): ROOT CAUSE FOUND — the ESP->controller TX channel is open
+
+Kai ran the clean A/B: CN2 back to the controller with the ESP entirely
+removed -> NO E5, machine works. ESP back inline -> E5. The module is the
+cause, as every earlier test implied. `/api/pinprobe` then localised it to
+a single channel, reproducibly (4 probes, 2 rounds):
+
+    GPIO6 -> CONTROLLER   pullup=1 pulldown=0 drive=1/0   external pull-up MISSING
+    GPIO3 -> PANEL        pullup=1 pulldown=1 drive=1/0   external pull-up PRESENT
+
+Both pads drive and read back their own level (edges 200/200), so the ESP
+is fine. The difference is entirely external, and the panel channel is the
+built-in control: same board, same probe, opposite result.
+
+`pulldown` is the discriminating measurement. With the pad's INTERNAL
+pull-down (~45k) enabled, a healthy channel still reads HIGH because the
+shifter's 10k pull-up wins. The controller channel reads LOW -> no external
+pull-up is present on that LV net -> that channel is open or unpowered.
+
+Consequence, and it explains every observation of the last three days:
+the ESP can pull the controller's RX line low through the MOSFET body diode
+but cannot return it high, so the controller receives nothing usable. It
+declares panel starvation ~5 s after boot and raises bit 6 -- which is
+exactly the unit-1 semantics of that bit, and exactly the 5 s timing
+captured over serial. Meanwhile:
+
+- the ESP RECEIVES both directions perfectly (bad=0) -- RX paths are
+  independent of this break, which is why every capture looked healthy;
+- the bare machine works -- the panel drives the controller directly and
+  the shifter is not in the path at all;
+- wire mode, CPU relay, the minimal image and radio-off were all
+  irrelevant, because the break is on the FAR side of the ESP pad. Every
+  software experiment was testing the wrong side of the fault.
+
+That is why the firmware could never be made to fix it, and why the fault
+appeared after Wednesday's heavy cycle testing -- heat and vibration on a
+solder joint or a wire.
+
+THE FIX (hardware, one connection): repair the path from XIAO **GPIO6** to
+the controller's CN2 **pin 2** (its RX input) -- the converter LV pad wire,
+that channel's pull-up/solder joints, and the HV wire out to pin 2. Verify
+with `POST /api/pinprobe?pin=6`: it must report "pin drives and reads back;
+shifter pull-up present", matching GPIO3. A 10k from that LV net to 3V3
+restores the pull-up if the resistor/joint is the failure; an open wire
+needs re-making.
+
+Diagnostic lesson worth keeping: we could see everything the module
+RECEIVED and nothing it TRANSMITTED, so a broken transmit path presented
+as a perfect link. `/api/pinprobe` -- comparing a suspect channel against a
+known-good one on the same board -- is the tool that closed it, and should
+be the FIRST thing run whenever both ends complain while the captures look
+clean.
