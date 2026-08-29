@@ -101,6 +101,11 @@ static void monLine() {
                 (unsigned long)cn2::byteCount(cn2::FROM_BOARD),
                 (unsigned long)cn2::byteCount(cn2::FROM_PANEL),
                 (long)cn2::lastByteAgeMs(cn2::FROM_BOARD));
+  if (cn2::wire()) Serial.print(F("[mode ] WIRE — E5 mask inert (pad bridge)\n"));
+  Serial.printf("[mask ] mode=%u on=%d masked=%lu leaks=%lu why=%s\n",
+                (unsigned)cn2::e5FilterMode(), (int)cn2::e5FilterMasking(),
+                (unsigned long)cn2::e5FilterFrames(),
+                (unsigned long)cn2::e5FilterLeaks(), cn2::e5FilterWhy());
   // The whole controller frame, because byte 5 is the earliest divergence
   // known: the 2026-08-26 latch capture shows it settle to 0x0A at t=710 ms,
   // 4.4 s BEFORE the status bit -- healthy idle on this unit reads 0x09.
@@ -110,8 +115,8 @@ static void monLine() {
 }
 
 static void consoleHelp() {
-  Serial.println(F("[con  ] s=status  m=monitor toggle  r=reboot  "
-                   "W=radio ON+reboot  X=radio OFF+reboot  ?=help"));
+  Serial.println(F("[con  ] s=status m=monitor c=CPU-relay w=wire "
+                   "e/E=E5 mask on/off r=reboot W/X=radio on/off ?=help"));
 }
 
 static void consoleExec(const char *c) {
@@ -130,6 +135,27 @@ static void consoleExec(const char *c) {
       nowifiStore(true);
       Serial.println(F("[con  ] radio DISABLED on next boot — rebooting"));
       delay(120); ESP.restart();
+      break;
+    case 'c':
+      // CPU relay. Bit 6 can only be masked here: wire mode is a pad bridge
+      // in the GPIO matrix, so no byte ever passes through software and the
+      // E5 filter is inert however it is set.
+      cn2::wireSet(false);
+      Serial.printf("[con  ] CPU RELAY mode (wire=%d)\n", (int)cn2::wire());
+      break;
+    case 'w':
+      // Manual only. Never switch to wire automatically -- on trouble in CPU
+      // relay the recovery is a power cycle and a fix, not a mode change.
+      cn2::wireSet(true);
+      Serial.printf("[con  ] WIRE mode (wire=%d)\n", (int)cn2::wire());
+      break;
+    case 'e':
+      cn2::setE5Filter(cn2::E5F_FORCE);
+      Serial.println(F("[con  ] E5 filter FORCE — bit 6 masked before the panel"));
+      break;
+    case 'E':
+      cn2::setE5Filter(cn2::E5F_OFF);
+      Serial.println(F("[con  ] E5 filter OFF — panel sees bit 6 raw"));
       break;
     case 'r':
       Serial.println(F("[con  ] rebooting"));
