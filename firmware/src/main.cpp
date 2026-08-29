@@ -15,6 +15,7 @@
 #include <WiFi.h>
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
+#include <Preferences.h>
 
 #include "app.h"
 #include "config.h"
@@ -51,6 +52,107 @@ bool     safeMode()        { return g_safe_mode; }
 uint32_t bootCount()       { return g_boot_count; }
 bool     imageMarkedGood() { return g_marked_ok; }
 }  // namespace app
+
+
+// ---------------------------------------------------------------------------
+// USB serial console + radio-off mode.
+//
+// When the module is on a USB cable there is a channel that costs the machine
+// nothing: no association, no DHCP, no ~300 mA transmit bursts on the CN2 5 V
+// net. That matters here because the radio is the last unexonerated load in
+// the E5 investigation -- WiFi is precisely what we want to be able to switch
+// OFF while keeping full telemetry.
+//
+// "nowifi" in NVS skips net/web/kasa entirely; everything is then driven from
+// this console. Read and written through a LOCAL Preferences handle -- the
+// long-lived one belongs to cn2 and begin()/end() on it breaks that owner.
+// ---------------------------------------------------------------------------
+static bool     g_nowifi  = false;
+static bool     g_mon     = false;   // periodic one-line telemetry
+static uint32_t g_mon_ms  = 0;
+static char     g_cbuf[48];
+static uint8_t  g_clen    = 0;
+
+static bool nowifiStored() {
+  Preferences p;
+  if (!p.begin("d8link", true)) return false;
+  const bool v = p.getBool("nowifi", false);
+  p.end();
+  return v;
+}
+
+static void nowifiStore(bool v) {
+  Preferences p;
+  if (!p.begin("d8link", false)) return;
+  p.putBool("nowifi", v);
+  p.end();
+}
+
+static void monLine() {
+  const uint8_t st = cn2::statusReal();
+  Serial.printf("[mon  ] t=%6lus st=0x%02X%s%s temp=%u ok_c=%lu ok_p=%lu "
+                "bad=%lu/%lu bb=%lu pb=%lu age_c=%ldms\n",
+                (unsigned long)(millis() / 1000), st,
+                (st & 0x40) ? " LATCH" : "",
+                (st & 0x82) ? " LID"   : "",
+                (unsigned)cn2::tempReal(),
+                (unsigned long)cn2::frameOk(0), (unsigned long)cn2::frameOk(1),
+                (unsigned long)cn2::frameBad(0), (unsigned long)cn2::frameBad(1),
+                (unsigned long)cn2::byteCount(cn2::FROM_BOARD),
+                (unsigned long)cn2::byteCount(cn2::FROM_PANEL),
+                (long)cn2::lastByteAgeMs(cn2::FROM_BOARD));
+  // The whole controller frame, because byte 5 is the earliest divergence
+  // known: the 2026-08-26 latch capture shows it settle to 0x0A at t=710 ms,
+  // 4.4 s BEFORE the status bit -- healthy idle on this unit reads 0x09.
+  Serial.printf("[frame] B>P %s   P>B %s\n",
+                cn2::lastFrameHex(cn2::FROM_BOARD).c_str(),
+                cn2::lastFrameHex(cn2::FROM_PANEL).c_str());
+}
+
+static void consoleHelp() {
+  Serial.println(F("[con  ] s=status  m=monitor toggle  r=reboot  "
+                   "W=radio ON+reboot  X=radio OFF+reboot  ?=help"));
+}
+
+static void consoleExec(const char *c) {
+  switch (c[0]) {
+    case 's': monLine(); break;
+    case 'm':
+      g_mon = !g_mon;
+      Serial.printf("[con  ] monitor %s\n", g_mon ? "ON (1 Hz)" : "off");
+      break;
+    case 'W':
+      nowifiStore(false);
+      Serial.println(F("[con  ] radio ENABLED on next boot — rebooting"));
+      delay(120); ESP.restart();
+      break;
+    case 'X':
+      nowifiStore(true);
+      Serial.println(F("[con  ] radio DISABLED on next boot — rebooting"));
+      delay(120); ESP.restart();
+      break;
+    case 'r':
+      Serial.println(F("[con  ] rebooting"));
+      delay(120); ESP.restart();
+      break;
+    default: consoleHelp(); break;
+  }
+}
+
+static void consoleLoop() {
+  while (Serial.available()) {
+    const char ch = (char)Serial.read();
+    if (ch == '\n' || ch == '\r') {
+      if (g_clen) { g_cbuf[g_clen] = 0; consoleExec(g_cbuf); g_clen = 0; }
+    } else if (g_clen < sizeof(g_cbuf) - 1) {
+      g_cbuf[g_clen++] = ch;
+    }
+  }
+  if (g_mon && (uint32_t)(millis() - g_mon_ms) >= 1000) {
+    g_mon_ms = millis();
+    monLine();
+  }
+}
 
 static void bootGuard() {
   if (rtc_magic != BOOT_MAGIC) {   // cold boot — RTC RAM is garbage
@@ -94,6 +196,7 @@ void setup() {
   cn2::earlyBridge();   // NVS-aware re-apply; harmless repeat
   bootGuard();
   g_boot_ms = millis();
+  g_nowifi = nowifiStored();
 
   // ---- WATCHDOG BEFORE THE PAYLOAD, NOT AFTER ----------------------------
   //
@@ -142,7 +245,7 @@ void setup() {
     Serial.println("[boot ] SAFE MODE — CN2 link disabled, OTA only. "
                    "Power-cycle to clear.");
   } else {
-    kasa::begin();
+    if (!g_nowifi) kasa::begin();
     cn2::begin();
     Serial.printf("[cn2  ] link open %lu ms after boot\n",
                   (unsigned long)millis());
@@ -171,23 +274,33 @@ void setup() {
                 (int)esp_reset_reason(), (unsigned long)g_boot_count,
                 g_safe_mode ? "   ** SAFE MODE **" : "");
 
-  net::begin();
-  web::begin();
+  if (g_nowifi) {
+    Serial.println(F("[wifi ] RADIO OFF (NVS nowifi) — USB console only. "
+                     "'W' re-enables, 'm' starts the 1 Hz monitor."));
+    g_mon = true;
+    consoleHelp();
+  } else {
+    net::begin();
+    web::begin();
+  }
 
 }
 
 void loop() {
   esp_task_wdt_reset();
 
-  net::loop();     // ArduinoOTA.handle() + link watchdog
-  kasa::powerPoll();
-  web::loop();
+  consoleLoop();
+  if (!g_nowifi) {
+    net::loop();     // ArduinoOTA.handle() + link watchdog
+    kasa::powerPoll();
+    web::loop();
+  }
   if (!g_safe_mode) cn2::loop();
 
   // Declare this boot healthy once we have been up a while WITH working WiFi.
   // Gating on WiFi is the point: an image that runs but cannot be reached is
   // not a good image, and should be rolled back rather than kept.
-  if (!g_marked_ok && WiFi.status() == WL_CONNECTED &&
+  if (!g_marked_ok && (g_nowifi || WiFi.status() == WL_CONNECTED) &&
       millis() - g_boot_ms > HEALTHY_UPTIME_MS) {
     g_marked_ok = true;
     rtc_boots = 0;   // clears the boot-loop guard
