@@ -371,3 +371,43 @@ as a perfect link. `/api/pinprobe` -- comparing a suspect channel against a
 known-good one on the same board -- is the tool that closed it, and should
 be the FIRST thing run whenever both ends complain while the captures look
 clean.
+
+
+### Detect confirms the map, and narrows the fault to GPIO6 (2026-08-28 night)
+
+`GET /api/detect` (passive edge counting, independent of config.h and of
+wiring.md):
+
+    edge counts   GPIO5=136   GPIO4=66   GPIO3=0   GPIO6=0
+    rx_ctrl=5  rx_panel=4   tx stubs = {6, 3}
+
+The two DRIVEN stubs are GPIO5 (controller output, 8-byte frames) and
+GPIO4 (panel output, 5-byte frames) -- the 136:66 ratio matches 8-byte vs
+5-byte frames at the same 5 Hz. GPIO3 and GPIO6 carry ZERO edges, i.e.
+they are the two device INPUTS. That is a third independent confirmation
+of the map, after frame headers (A2 on GPIO5, AA on GPIO4) and the
+no-corruption test (driving GPIO6 200 times leaves bad_p at 0).
+
+Kai reports the module was never rewired, so wiring.md's table disagrees
+with the copper. Measurement wins; the table is stale and should not be
+used to trace this harness.
+
+Which input is which: Kai reports the LID OVERRIDE still works during E5.
+That override rewrites the controller->panel frame (cn2.cpp:886,
+"what the panel will see"), which goes out on txp = GPIO3. So GPIO3 ->
+panel input is CONFIRMED BY FUNCTION, and GPIO6 -> controller input
+follows by elimination.
+
+This makes the diagnosis airtight rather than inferred: GPIO3 is a
+working input stub WITH its shifter pull-up; GPIO6 is the other input
+stub WITHOUT one. A connected channel presents ~10k from the ESP pad to
+3V3. GPIO6 presents none, so that net is open.
+
+Note the disproof of the "D4 goes to panel pin 2" reading: GPIO6 shows
+ZERO edges. The panel transmits 5 frames/s, so anything on the panel's TX
+output would show ~66 edges like GPIO4 does. GPIO6 sees nothing at all.
+
+SHARPEST MEASUREMENT (no channel labels needed, power off):
+measure resistance from the XIAO **D4/GPIO6 pad to 3V3**, then from
+**D1/GPIO3 pad to 3V3** as the reference. Good channel ~10k; the faulty
+one reads open. That one comparison localises the break.
