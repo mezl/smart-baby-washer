@@ -133,7 +133,8 @@ static void consoleExec(const char *c) {
       break;
     case 'X':
       nowifiStore(true);
-      Serial.println(F("[con  ] radio DISABLED on next boot — rebooting"));
+      Serial.println(F("[con  ] radio DISABLED for the NEXT BOOT ONLY "
+                       "(one-shot; a power cycle restores it) — rebooting"));
       delay(120); ESP.restart();
       break;
     case 'c':
@@ -222,7 +223,14 @@ void setup() {
   cn2::earlyBridge();   // NVS-aware re-apply; harmless repeat
   bootGuard();
   g_boot_ms = millis();
+  // ONE-SHOT, deliberately. A persistent radio-off flag can strand the module
+  // with no web page, no HA and no serial once the USB cable comes out -- which
+  // is exactly what happened on 2026-08-28: the flag survived, the cable left,
+  // and the only remaining way in was a physical replug. Consuming it here means
+  // a power cycle ALWAYS restores the radio, so radio-off is a thing you can
+  // enter for a test but never a state you can get stuck in.
   g_nowifi = nowifiStored();
+  if (g_nowifi) nowifiStore(false);
 
   // ---- WATCHDOG BEFORE THE PAYLOAD, NOT AFTER ----------------------------
   //
@@ -301,8 +309,8 @@ void setup() {
                 g_safe_mode ? "   ** SAFE MODE **" : "");
 
   if (g_nowifi) {
-    Serial.println(F("[wifi ] RADIO OFF (NVS nowifi) — USB console only. "
-                     "'W' re-enables, 'm' starts the 1 Hz monitor."));
+    Serial.println(F("[wifi ] RADIO OFF for this boot only — USB console. "
+                     "'W' re-enables now; any power cycle also restores it."));
     g_mon = true;
     consoleHelp();
   } else {
