@@ -156,6 +156,12 @@ def write_brd(path):
     for t in B.texts:
         o.append(f'<text x="{t.x:.3f}" y="{B.BOARD_H-t.y-t.size:.3f}" size="{t.size:.3f}" '
                  f'layer="{L_TPLACE}">{t.s}</text>')
+    # Silkscreen strokes: the USB-direction arrow and the JST latch brackets.
+    for l in B.lines:
+        x1, y1, x2, y2 = l.p
+        o.append(f'<wire x1="{x1:.3f}" y1="{B.BOARD_H-y1:.3f}" '
+                 f'x2="{x2:.3f}" y2="{B.BOARD_H-y2:.3f}" '
+                 f'width="0.15" layer="{L_TPLACE}"/>')
     o.append('</plain>')
     o.append('<libraries>')
     o += library_xml()

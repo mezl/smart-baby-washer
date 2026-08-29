@@ -55,6 +55,42 @@ choice, but getting it wrong wastes a board.
 If you would rather have both parts on top, put the shifter beside the XIAO
 instead of between its rows; that costs roughly 14 mm of board length.
 
+## Reading the silkscreen
+
+| Mark | Meaning |
+|---|---|
+| `PNL` / `CTL` | which cable goes on which edge — panel bottom, controller top |
+| `USB` + arrow | the end the XIAO's USB-C port faces |
+| `[` `]` bracket | the side the JST latch faces on J1 and J2 |
+| square pad | pin 1, on every connector and both modules |
+
+**The USB arrow matters.** `D0` and `5V` are the two pins at the USB end of the
+XIAO, and both sit at the low-y end here, so the port faces the **panel**
+connector. Fit the module the other way round and every signal lands on the
+wrong pin — there is no keying to stop you, and the board looks right.
+
+**The bracket is the JST latch side.** An XH shroud is not symmetric: the ramp
+the cable's clip engages is on one long side. Both are marked facing the nearest
+board edge, so the clips are reachable from outside once the board is mounted.
+Fit one backwards and the clip faces the board and cannot be released.
+
+### ⚠️ USB access is tight — socket the XIAO, and plug USB in first
+
+The USB port faces J2, about 1.4 mm from the connector. On 2.54 mm sockets the
+module stands ~8.5 mm off the board, so the port clears the JST *housing* — but
+a **mated** panel cable stands about as tall as the USB plug and sits directly
+in front of it.
+
+In practice: **plug the USB cable in before the panel cable**, or leave the
+panel cable's service loop long enough to swing aside. This is not theoretical
+— a whole debugging session on this project ran over USB serial with the radio
+disabled, so losing USB access once assembled is a real cost.
+
+If you would rather not live with it, both connectors can go on the **top**
+edge, leaving the USB end of the board clear. Two 4-pin connectors need about
+19.5 mm side by side, so the board becomes roughly 21 × 24 mm — near enough the
+same area, with the USB fully accessible.
+
 ## Bill of materials — four parts
 
 | Ref | Part | Notes |
@@ -284,6 +320,7 @@ complaint, not a geometry or connectivity one.
 - the board's pin map is compared against `firmware/include/config.h` and the
   run fails on a mismatch
 - module bodies (not just their pads) are checked against every connector pad
+- silkscreen is checked to stay on the board and off every pad
 
 **Not checked.** Be clear-eyed about this list:
 

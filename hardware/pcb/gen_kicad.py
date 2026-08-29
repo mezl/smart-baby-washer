@@ -122,6 +122,15 @@ def main():
         tx.SetTextThickness(mm(0.15))
         board.Add(tx)
 
+    for l in B.lines:
+        x1, y1, x2, y2 = l.p
+        sh = pcbnew.PCB_SHAPE(board)
+        sh.SetShape(pcbnew.SHAPE_T_SEGMENT)
+        sh.SetStart(pt(x1, y1)); sh.SetEnd(pt(x2, y2))
+        sh.SetLayer(pcbnew.F_SilkS)
+        sh.SetWidth(mm(0.15))
+        board.Add(sh)
+
     pcbnew.SaveBoard(OUT, board)
 
     # KiCad's own DRC, not mine. This is the check that actually counts.

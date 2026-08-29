@@ -44,7 +44,7 @@ RULE_MIN_DRILL = 0.30
 EDGE_KEEPOUT   = 0.50
 
 BOARD_W, BOARD_H = 18.6, 27.0
-pads, tracks, texts = [], [], []
+pads, tracks, texts, lines = [], [], [], []
 
 
 class Pad:
@@ -64,6 +64,13 @@ class Track:
 class Text:
     def __init__(self, s, x, y, size=1.2):
         self.s, self.x, self.y, self.size = s, x, y, size
+
+
+class Line:
+    """A silkscreen stroke. The font can only draw glyphs, and an arrow that
+    says which way the USB port faces is worth more than any three letters."""
+    def __init__(self, x1, y1, x2, y2):
+        self.p = (x1, y1, x2, y2)
 
 
 def header(ref, x0, y0, n, rows=1, rowgap=0.0, pitch=2.54, drill=1.0, pad=1.8,
@@ -203,6 +210,19 @@ def bodies():
         out.append((name, cx-bw/2, cy-bh/2, cx+bw/2, cy+bh/2))
     return out
 
+def silk_check():
+    """Silkscreen must stay on the board and off every pad."""
+    bad = []
+    for (x1, y1, x2, y2) in silk_segments():
+        if min(x1,x2) < 0 or min(y1,y2) < 0 \
+           or max(x1,x2) > BOARD_W or max(y1,y2) > BOARD_H:
+            bad.append(f"silk stroke off the board at ({x1:.2f},{y1:.2f})")
+        for p in pads:
+            if rect_seg(p.bbox(), (x1,y1), (x2,y2)) < 0.125:
+                bad.append(f"silk stroke on pad {p.ref}.{p.name}")
+    return sorted(set(bad))
+
+
 def mechanical():
     """Module bodies must clear the connectors and stay on the board."""
     bad = []
@@ -310,7 +330,38 @@ texts = [
     Text("PNL", 0.9, 0.50, 0.8),
     Text("CTL", 0.9, BOARD_H - 1.30, 0.8),
     Text("D8 CN2", COR0 + 0.2, CY - 0.50, 0.8),
+    # Which end the XIAO's USB-C faces. D0 and 5V are the pins at the USB end
+    # of the module, and both sit at the LOW-y end here, so the port points at
+    # the panel connector. Getting this wrong fits the module backwards and
+    # every signal lands on the wrong pin.
+    Text("USB", 13.95, 0.90, 0.8),
 ]
+
+def _bracket(y, out, x0, x1, tick=0.55):
+    """A [ ] bracket along a connector, opening towards `out` (+1 or -1).
+
+    This is the JST latch side. The shroud is not symmetric: the ramp the
+    cable's clip engages is on one long side, and if the connector is fitted
+    the other way round the clip ends up facing the board and cannot be
+    released. Marking it costs three strokes."""
+    return [Line(x0, y, x1, y),
+            Line(x0, y, x0, y + out*tick),
+            Line(x1, y, x1, y + out*tick)]
+
+# The latch faces the nearest board edge on both connectors, so the cable
+# clips are reachable from outside once the board is in place.
+# The bracket ends sit just OUTSIDE the pad row in x, so the ticks can turn
+# inward without touching a pad -- turning them outward ran them off the board.
+_J_X0, _J_X1 = J_X0 - 1.26, J_X0 + 3*2.54 + 1.26
+
+lines  = _bracket(0.32, +1, _J_X0, _J_X1)                 # J2, panel, bottom
+lines += _bracket(BOARD_H - 0.32, -1, _J_X0, _J_X1)       # J1, controller, top
+
+# Arrow beside the USB text, pointing at the end the port faces.
+lines += [Line(17.15, 0.45, 16.55, 1.45),
+          Line(17.15, 0.45, 17.75, 1.45),
+          Line(16.55, 1.45, 17.75, 1.45),
+          Line(17.15, 0.45, 17.15, 2.35)]
 
 # ============================================================================
 # DRC
@@ -497,7 +548,7 @@ FONT = {
 }
 
 def silk_segments():
-    segs = []
+    segs = [l.p for l in lines]
     for t in texts:
         sc, cx = t.size/4.0, t.x
         for ch in t.s.upper():
@@ -585,7 +636,7 @@ def main():
     print(f"shifter rows   {LS_ROW} mm  <-- verify with calipers before ordering")
     print(f"pads           {len(pads)}   tracks {len(tracks)}   nets {len(NETS)}")
     print(f"drills         {sorted(holes)} mm ({sum(len(v) for v in holes.values())} holes)")
-    mech = mechanical()
+    mech = mechanical() + silk_check()
     pm = check_firmware_pinmap()
     print("pin map        " + "  ".join(f"{k.split('_',1)[1].lower()}={v}"
                                         for k, v in BOARD_PINMAP.items()))
@@ -601,7 +652,7 @@ def main():
         print("MECHANICAL     FAIL")
         for m in mech: print("   ", m)
     else:
-        print("MECHANICAL     PASS — module bodies clear the connectors")
+        print("MECHANICAL     PASS — bodies clear the connectors, silk on the board and off the pads")
     print(f"DRC            {checks} checks @ {RULE_CLEARANCE} mm clearance")
     if errs:
         print(f"DRC            FAIL — {len(errs)} violation(s)")
