@@ -169,11 +169,67 @@ module**, which removes 12 through-holes and the nesting problem entirely, or
 **4 layers**. Note that none of this saves money: JLCPCB charges the same for
 anything up to 100 × 100 mm, so size only buys fit.
 
+## Panelised for a JLCPCB minimum order
+
+JLCPCB's minimum order is **5 pieces**, and its base tier covers any single
+design up to **100 × 100 mm** — so a panel of copies costs what one small board
+costs. `gen_panel.py` tiles the board into the largest grid that still fits:
+
+```
+  5 × 3 = 15 boards      panel 93.0 × 81.0 mm      5 panels = 75 boards
+```
+
+```bash
+python3 gen_panel.py        # 5 x 3, the largest that fits
+python3 gen_panel.py 3 2    # or any smaller grid
+```
+
+Output lands in `gerbers-panel/`, with `preview-panel.svg` to eyeball first.
+The generator re-runs the board's DRC, connectivity, mechanical and pin-map
+checks and refuses to panelise if any fail — a panel of a broken board is 15
+broken boards.
+
+### V-scoring, not mouse bites
+
+The boards **abut with no gap**, which is what lets 15 fit. V-scoring needs a
+straight line running the full width or height of the panel, and a grid of
+identical rectangles is exactly that. Tab-routing would need a ~2 mm slot
+between every pair and would cost a column.
+
+Nothing had to change to make the copper safe for it: the board already keeps
+every pad and track **0.5 mm** from its edge, and V-scoring wants 0.4 mm.
+
+**The score lines are on their own layer** (`-V_Cut.gbr`), deliberately not on
+`Edge_Cuts`. Anything on the outline layer is read as a route, and a router
+following those lines would cut the panel into 15 loose boards at the fab
+instead of scoring it. `Edge_Cuts` carries the panel border and nothing else.
+
+### Ordering
+
+Upload `gerbers-panel/` as a zip, then on the order page:
+
+| Field | Value |
+|---|---|
+| Different Design | **1** |
+| Delivery Format | **Panel by Customer** |
+| Column × Row | **5 × 3** |
+| Board size | 93 × 81 mm (JLC fills this from the Gerbers) |
+
+Add a note asking for **V-scoring on the lines in `cn2-interceptor-panel-V_Cut.gbr`**.
+Check their rendered preview before paying — it shows the score lines, and that
+is the one place a misread would be visible before it is fabricated.
+
+Panelised orders sometimes carry a small surcharge and the rules do change, so
+confirm the price at upload rather than trusting this table. If it has moved,
+`python3 gen_panel.py 2 2` gives four boards on a 37 × 54 mm panel, and a plain
+single board is always `gerbers-kicad/`.
+
 ## Files
 
 | | |
 |---|---|
 | `gen_pcb.py` | the board as explicit geometry — placement, nets, routing, its own DRC, preview |
+| `gen_panel.py` | tiles the board into a JLCPCB-sized panel with V-score lines |
 | `gen_kicad.py` | builds a native `.kicad_pcb` via the pcbnew API **and runs KiCad's own DRC** |
 | `gen_eagle.py` | emits `.sch` and `.brd` from the same model |
 | `gen_kicad_sch.py` | emits a native `.kicad_sch` from the same model |
@@ -182,6 +238,7 @@ anything up to 100 × 100 mm, so size only buys fit.
 | `cn2-interceptor.sch` / `.brd` | Eagle 9 XML, for Eagle / Fusion 360 |
 | `gerbers-kicad/` | **exported by KiCad itself** — this is the set to send to a fab |
 | `gerbers/` | my own writer's output, kept as a cross-check |
+| `gerbers-panel/` | **the 5 × 3 panel** — upload this zip for a 15-up order |
 | `drc-report.txt` | KiCad's DRC output from the last run |
 
 Regenerate everything:
