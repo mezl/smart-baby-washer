@@ -232,3 +232,36 @@ shifter/analog branch reopens.
 
 Interim state: machine usable from the panel; no web UI / HA / logging
 until the module gets USB power.
+
+
+## Update 2026-08-28 (USB split-power attempt): back-feed invalidates the test
+
+Kai fed the XIAO from USB (PC) with the machine open. Result: ESP alive on
+WiFi (1.17.8), link PERFECT (2381 frames, 0 bad checksums), but the panel
+still shows E5 and the controller reports st=0xC2.
+
+WHY THE TEST DID NOT RUN: the split was never achieved. wiring.md is
+explicit -- "controller pin 4 (+5 V) = panel pin 4 = converter HV = XIAO
+5V, one net". USB VBUS therefore back-feeds the machine logic rail through
+the XIAO 5V pad. PROVEN: with the Shelly at 0.0 W (mains fully off) the
+controller kept emitting B>P frames every 200 ms -- the controller and
+panel MCUs were running on USB power.
+
+Consequences:
+- The Shelly can no longer reset the controller/panel while USB is
+  plugged, so the E5 latch CANNOT be cleared and every "power cycle" is a
+  brownout dip (loads drop, logic stays up) -- itself a good way to INDUCE
+  a fault. st was observed going 0x82 -> 0xC2 across one such dip.
+- All boot-latch results taken in this configuration are void.
+- st=0xC2 = 0x40 latch + 0x82 lid-open (machine is physically open;
+  0x82 is expected while the lid is off and is NOT a fault).
+
+REQUIRED to actually run the experiment: disconnect ONLY the wire from the
+CN2 pin-4 (+5 V) net to the XIAO **5V pad**. Keep everything else --
+converter HV stays on the machine 5 V net, GND common, all four signal
+lines. Then the XIAO is USB-only, the machine is Shelly-controlled, and no
+back-feed exists.
+
+That cut is simultaneously the decisive TEST and the candidate FIX: it
+removes the module inrush/WiFi load from the machine 5 V rail at boot,
+which is the surviving hypothesis for the t~5.1 s latch.
