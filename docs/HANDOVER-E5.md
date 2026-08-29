@@ -265,3 +265,55 @@ back-feed exists.
 That cut is simultaneously the decisive TEST and the candidate FIX: it
 removes the module inrush/WiFi load from the machine 5 V rail at boot,
 which is the surviving hypothesis for the t~5.1 s latch.
+
+
+## Update 2026-08-28 (evening): WiFi ELIMINATED — radio-off test with serial telemetry
+
+New tooling (fw 1.18.3): a **USB serial console** plus an NVS `nowifi`
+mode that skips net/web/kasa entirely. This finally decoupled telemetry
+from the radio, which had been the last unexonerated load. Console keys:
+`s` status, `m` 1 Hz monitor, `c` CPU relay, `w` wire, `e`/`E` E5 mask
+on/off, `r` reboot, `W`/`X` radio on/off, `?` help. Flash over USB with
+`pio run -e c3 -t upload --upload-port /dev/ttyACM0` -- no OTA needed.
+
+RESULT: with the radio completely dark, the controller STILL latches.
+Captured at 1 Hz over serial, twice:
+
+    t=40s  A2 16 00 82 04 00 03 31   clean boot, NO latch
+    t=41s  A2 16 00 82 04 0C 03 3D   byte5 settles 0x00 -> 0x0C
+    t=45s  A2 16 00 C2 04 0C 03 7D   bit 6 set -- exactly 5 s later
+           bad_c frozen at 54 across the whole window: ZERO bad frames
+
+**WiFi power draw and RF are therefore NOT the E5 trigger.** The theory
+that survived three days is dead, and with it the whole rail-load branch
+as far as the radio is concerned.
+
+Confirmed structure of the fault: the controller boots CLEAN, communicates
+perfectly for 5 s, then raises bit 6 with no corrupted frame anywhere in
+between. It is a timed decision, not a reaction to bad data.
+
+Byte 5 is the earliest divergence and now looks like a state code, not a
+bitfield: 0x09 healthy idle, 0x0A on the 2026-08-26 latch (lid closed),
+0x0C today (lid open, machine on the bench). Still undecoded, but it
+settles ~1 s after boot -- 4 s BEFORE the status bit -- so whatever the
+controller decides, it decides early.
+
+Also established today:
+- The 5 V wire removal DID isolate the controller: during a mains cut its
+  line goes to noise (bad frames, ~500 byte/s of garbage) and ok_c freezes,
+  i.e. the controller is genuinely unpowered. The PANEL stays up on USB.
+- Therefore the panel no longer resets with the machine, so its own E5
+  latch cannot be cleared by the Shelly. Clearing it needs mains off AND
+  USB unplugged together.
+- Bit 6 can only be masked in CPU relay mode. In wire mode the pad bridge
+  means no byte passes through software and the E5 filter is inert however
+  it is set -- worth knowing before trusting `e5f_mode=2`.
+
+Open at the end of the session: the machine reads 0.0 W on the Shelly with
+the outlet ON (standby was 1.4-1.8 W), i.e. it is not receiving mains --
+a physical matter with the unit open on the bench.
+
+Remaining ranked experiments: unchanged, minus WiFi. The fault is a
+5-second timed decision by the controller that only occurs with the module
+electrically inline, so the next evidence must come from a meter or a
+scope on the CN2 lines, not from firmware.
