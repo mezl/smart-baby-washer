@@ -462,3 +462,45 @@ Software was never implicated: the transmitted frames are byte-perfect with
 valid checksums, verified from the to_panel history
 (A2 18 00 C2 04 0C 03 73 received -> A2 58 00 82 04 0C 03 73 sent with a
 deliberate 88 C spoof and bit 6 stripped).
+
+
+## 2026-08-29: firmware EXONERATED by full-history bisection
+
+Kai asked for a revert. Three builds spanning the entire project were
+flashed to the same hardware and power-cycled, with the machine on the
+Shelly so the controller genuinely restarted each time:
+
+| build  | what it is                                   | result |
+|--------|----------------------------------------------|--------|
+| 1.18.5 | current                                       | latches, st=0xC2 |
+| 1.14.1 | 2026-08-23, the build that ran a FULL cycle inline | latches, st=0xC2 |
+| 1.0.0  | first public commit (9bae832), PLAIN RELAY -- no E5 filter, no wire mode, no rewriting of any kind | latches, st=0xC2 |
+
+Every one latches within ~5 s of controller power-up with zero bad
+checksums in either direction. **The firmware is not the cause, across its
+entire history.** 1.0.0 in particular rewrites nothing at all, so there is
+no software behaviour left to blame.
+
+Combined with Kai's own A/B (module removed -> machine runs clean; module
+back -> E5), the fault is the module's physical presence and nothing else.
+No further firmware work can address it.
+
+Also settled tonight, and worth not re-litigating:
+- The ESP->panel path WORKS. The panel displays exactly what we transmit:
+  it showed lid OPEN because the controller reports 0xC2 and we forwarded
+  it faithfully, and the frame history confirms every emitted frame is
+  byte-perfect with a valid checksum. Kai was right that the panel keeps
+  updating lid state during E5 -- my "frozen panel" theory was wrong.
+- The lid override works: 0xC2 -> 0x00 on the wire, checksum valid.
+- A reported "st_fwd oscillation" was NOT real: it was the status JSON
+  being sampled while the relay task updated the mirrors. The to_panel
+  history shows a perfectly uniform stream. Read /api/hist, never the
+  status mirrors, when the question is what actually went out.
+- 1.14.1 boots into WIRE mode, where the E5 mask is inert (pad bridge, no
+  byte passes through software) and it predates the setPins() fix, so
+  switching it to CPU relay is a silent no-op. It is strictly worse than
+  current firmware for running the machine.
+
+Practical position: the machine runs correctly with the module removed.
+Anything further on E5 needs bench instrumentation on the module itself,
+not another firmware change.
