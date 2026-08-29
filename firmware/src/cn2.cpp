@@ -435,9 +435,12 @@ void earlyBridge() {
   Serial.println("[link ] early bridge: pads wired before init");
 }
 
-bool wireSet(bool on) {
-  if (s_pin_txb < 0 || s_pin_txp < 0) return false;   // LISTEN drives nothing
-  if (on == s_wire) return true;
+// The register work, split out of wireSet() so it can be re-APPLIED without a
+// state change. openPorts() needs exactly that: after closePorts() the pads
+// have to be handed back to whoever owns them in the CURRENT mode, and the
+// Arduino core cannot be trusted to do it -- see the U0TXD/U1TXD note below.
+static void wireApply(bool on) {
+  if (s_pin_txb < 0 || s_pin_txp < 0) return;
   if (on) {
     // controller out -> panel-in pad, panel out -> controller-in pad
     esp_rom_gpio_connect_in_signal(s_pin_rxb, SIG_IN_FUNC_97_IDX, false);
@@ -465,6 +468,12 @@ bool wireSet(bool on) {
     esp_rom_gpio_connect_out_signal(s_pin_txb, U0TXD_OUT_IDX, false, false);  // uBoard = Serial0
     esp_rom_gpio_connect_out_signal(s_pin_txp, U1TXD_OUT_IDX, false, false);  // uPanel = Serial1
   }
+}
+
+bool wireSet(bool on) {
+  if (s_pin_txb < 0 || s_pin_txp < 0) return false;   // LISTEN drives nothing
+  if (on == s_wire) return true;
+  wireApply(on);
   s_wire = on;
   // A LOCAL handle, deliberately. Several setters do s_prefs.begin()/end()
   // on the shared handle, and after any of them runs, writes through s_prefs
@@ -499,6 +508,20 @@ static void openPorts() {
   uPanel.setRxTimeout(1);
 
   s_open = true;
+
+  // Re-assert who owns the TX pads for the CURRENT mode.
+  //
+  // begin() is NOT enough. The core's peripheral manager records the pins as
+  // already attached to these UARTs, so when a caller has taken a pad in the
+  // meantime -- pinProbe() drives it as a plain GPIO, and closePorts()/
+  // openPorts() bracket exactly that -- begin() "skips" the matrix reattach it
+  // does not know was lost. The UART then transmits into a pad it no longer
+  // drives: forwarding keeps counting bytes, the frames are byte-perfect in
+  // to_panel history, and NOTHING reaches the appliance. That is the same
+  // failure mode as the setPins() no-op, and it cost a full evening of chasing
+  // a hardware fault that did not exist -- the panel simply stopped receiving
+  // the moment the first probe ran.
+  wireApply(s_wire);
 
   Serial.printf("[link ] relay @ %lu 8N1   board rx=GPIO%d tx=GPIO%d"
                 "   panel rx=GPIO%d tx=GPIO%d\n",

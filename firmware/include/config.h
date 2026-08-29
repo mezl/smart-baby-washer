@@ -5,7 +5,7 @@
 #include "secrets.h"
 
 #define FW_NAME     "d8-cn2sniffer"
-#define FW_VERSION    "1.18.4"
+#define FW_VERSION    "1.18.5"
 
 
 // ---- Network identity ------------------------------------------------------
