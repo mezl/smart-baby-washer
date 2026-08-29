@@ -1,17 +1,37 @@
 # CN2 interceptor carrier board
 
-A 31.5 × 26 mm, 2-layer carrier that sits in the CN2 cable between the D8
+A 18.6 × 27 mm, 2-layer carrier that sits in the CN2 cable between the D8
 controller and its front panel. CN2 pins 3 and 4 (GND, +5 V) pass straight
 through; pins 1 and 2 are routed through a level shifter to a XIAO ESP32-C3,
 which then sees and can rewrite every byte in both directions.
 
 <p align="center">
-  <img src="preview-kicad.svg" width="820" alt="Board: red = top copper, blue = bottom copper. J2 (panel) left, J1 (controller) right, level shifter nested between the XIAO's pin rows.">
+  <img src="preview-kicad.svg" width="420" alt="Board: red = top copper, blue = bottom copper. J2 (panel) on the bottom edge, J1 (controller) on the top edge, level shifter nested between the XIAO's pin rows.">
 </p>
 
-Left to right: **J2 (panel) · XIAO left row · level shifter · XIAO right row ·
-J1 (controller)**. U2 sits *inside* the XIAO's 15.24 mm row gap — its own rows
+**J2 (panel) on the bottom edge, J1 (controller) on the top**, with the XIAO
+between them and U2 nested *inside* the XIAO's 15.24 mm row gap — its own rows
 are 10.16 mm apart, so it drops straight into the middle.
+
+Standing the connectors on opposite edges rather than beside the XIAO is what
+makes the board narrow: nothing sits left or right of the module except one
+routing lane, so the width is the XIAO's row pitch plus that lane and two
+edges. It also suits the cable run, since the two CN2 stubs leave the board in
+opposite directions, the way they arrive.
+
+### Which connector goes where is not arbitrary
+
+Routing forces `LV1..LV4` onto `D1..D4` in order — they share a 0.94 mm channel
+and any other order makes their spans overlap four deep. `D1..D4` are GPIO 3, 4,
+5 and 6, and the firmware's as-built map is `rxb=5 txb=6 txp=3 rxp=4`: the
+**controller** pair on GPIO5/6 and the **panel** pair on GPIO3/4. GPIO5/6 are
+channels 3 and 4, which are the shifter's upper pins — so the controller has to
+enter from the top edge.
+
+Swap the connectors and the board still works, but only after swapping the four
+`PIN_*` defines. `gen_pcb.py` reads `firmware/include/config.h` on every run and
+fails if the two disagree, because a pin map that disagrees with the copper does
+not announce itself: frames simply stop decoding.
 
 ## ⚠️ Mount U2 on the underside
 
@@ -19,8 +39,8 @@ Packing the shifter inside the XIAO's rows puts the two modules on top of each
 other in plan view:
 
 ```
-XIAO module   17.5 × 21.0 mm   x  9.37 .. 26.87    y  2.50 .. 23.50
-shifter       15.7 × 13.2 mm   x 10.27 .. 25.97    y  6.40 .. 19.60
+XIAO module   17.5 × 21.0 mm   x  0.22 .. 17.72    y  3.00 .. 24.00
+shifter       15.7 × 13.2 mm   x  1.12 .. 16.82    y  6.90 .. 20.10
 ```
 
 The shifter's outline sits entirely inside the XIAO's. On 2.54 mm sockets the
@@ -39,82 +59,66 @@ instead of between its rows; that costs roughly 14 mm of board length.
 
 | Ref | Part | Notes |
 |---|---|---|
-| J1 | JST-XH 4-pin, 2.54 mm, vertical | cable to the **controller** CN2 |
-| J2 | JST-XH 4-pin, 2.54 mm, vertical | cable to the **panel** CN2 |
+| J1 | JST-XH 4-pin, 2.54 mm, vertical | **top** edge — cable to the **controller** CN2 |
+| J2 | JST-XH 4-pin, 2.54 mm, vertical | **bottom** edge — cable to the **panel** CN2 |
 | U1 | Seeed XIAO ESP32-C3 | 2×7, 2.54 mm pitch, 15.24 mm between rows |
 | U2 | 4-channel BSS138 level shifter | 2×6, 2.54 mm pitch |
-| J3 | JST-XH 3-pin, 2.54 mm, vertical | flow **meter** side — see below |
-| J4 | JST-XH 3-pin, 2.54 mm, vertical | flow **controller** side |
 
 Plus two 1×7 and two 1×6 header strips if you want the modules socketed rather
 than soldered down. Socketing the XIAO is worth it — it keeps `D5`, `D10` and
 `D7` reachable for the flow and switch simulation, which is why the board carries
 no separate header for them.
 
-## J3 / J4 — flow-meter relay
+## The flow-meter relay is not on this revision
 
-The FV cable is cut and **both ends land on the board**, exactly like CN2: J3
-takes the meter, J4 carries on to the controller, and the ESP32 sits in between.
-It can pass the real pulses straight through, rewrite their rate, or synthesise
-flow entirely on a dry bench.
+The previous board carried J3/J4, a relay for the flow-meter (FV) cable, so the
+ESP32 could pass the real pulses through, rewrite their rate, or synthesise flow
+on a dry bench. **It has been removed**, and that removal is most of the size
+reduction: six more pins would not share an edge with the CN2 connectors, so
+they forced the connectors back onto the left and right sides and the width from
+18.6 mm to 31.5 mm — the flow relay cost more board than everything else on it.
 
-| Pin | J3 (meter) | J4 (controller) | XIAO |
-|---|---|---|---|
-| 1 | `Vcc` | `Vcc` | — passes straight through |
-| 2 | `GND` | `GND` | board ground |
-| 3 | pulses out | pulses in | `D10 / GPIO10` ← in, `D7 / GPIO20` → out |
+If you put it back, the two findings that cost the most to learn are still worth
+having:
 
-Vcc and GND pass through J3↔J4 untouched, the same way CN2 pins 3 and 4 do. Only
-the signal line is broken.
+- **The ESP32-C3 is not 5 V tolerant and there is no channel left to shift the
+  flow signal** — all four converter channels are spoken for by CN2.
+  `docs/hardware.md` records the meter as having a 10 kΩ internal pull-up and
+  warns that running it at 5 V puts 5 V on a non-5V-tolerant GPIO. Measure FV
+  Vcc first; if it is 5 V, `GPIO10` needs a divider, or feed the meter from the
+  board's 3V3 so the whole signal drops to 3.3 V.
+- **Cutting the line removes the meter's pull-up from the controller's input**,
+  because that pull-up lives inside the meter and ends up on the far side of the
+  break. The simulated output then has to drive the line actively, or the
+  controller-side pin needs its own pull-up.
 
-### ⚠️ Measure FV Vcc before you connect this
-
-**The ESP32-C3 is not 5 V tolerant, and this board does not level-shift the flow
-signal** — the converter's four channels are all spoken for by CN2.
-
-`docs/hardware.md` records the meter as having a 10 kΩ internal pull-up, and
-warns that running it at 5 V "will put 5 V on a non-5V-tolerant GPIO". If FV Vcc
-measures 5 V on your machine, **`GPIO10` needs protection before J3 is plugged
-in.** A 10 k / 20 k divider on J3.3 is enough, or feed J3.1 from the board's 3V3
-instead of passing the controller's Vcc through, which drops the whole signal to
-3.3 V.
-
-There is a second consequence of cutting the line: **the controller's FV input
-loses the meter's pull-up**, because that pull-up is inside the meter and now
-sits on the far side of the break. `FLOW_OUT` therefore has to drive the line
-actively, or J4.3 needs its own pull-up to FV Vcc. The firmware currently drives
-`PIN_FLOW_SIM` open-drain, which assumed a pull-up that is no longer there.
-
-Neither is designed in yet. Measure FV Vcc first; the answer decides both.
-
-### Why those two pins, and what it cost
-
-The XIAO has only three GPIOs free that are safe to use: `GPIO7` (D5), `GPIO10`
-(D10) and `GPIO20` (D7). `GPIO2`, `GPIO8` and `GPIO9` are strapping pins and
-`GPIO21` emits ROM boot chatter at every reset.
-
-Both flow signals must come off the **same side** of the XIAO to be routable on
-two layers, and only `GPIO10` and `GPIO20` are on the right-hand column. That
-leaves `GPIO7` for one switch simulator, so **the lid switch (SW2) keeps it and
-SW1 loses its pin** — SW1 is the unidentified 3-pin switch, so it is the one
-worth giving up. It stays reachable on the XIAO's own header pin if you socket
-the module.
-
-`firmware/include/config.h` matches this board: `PIN_FLOW_SIM` moved from
-`GPIO7` to `GPIO20`, `PIN_SW2_SIM` from `GPIO10` to `GPIO7`, `PIN_FLOW_IN` is new
-on `GPIO10`, and the SW1 simulator is gone — `/api/sim` accepts `sw=2` only.
+Only `GPIO7` (D5), `GPIO10` (D10) and `GPIO20` (D7) are free and safe on this
+part — `GPIO2`, `GPIO8` and `GPIO9` are strapping pins and `GPIO21` emits ROM
+boot chatter at every reset. All three stay reachable on the XIAO's own header
+if you socket the module, which is the main reason to socket it.
 
 ## Connections
 
 | ch | CN2 | | Converter | XIAO | UART |
 |---|---|---|---|---|---|
-| 1 | J1 CONTROLLER pin 1 — TX, output | → | `HV1` · `LV1` | `D1 / GPIO3` | `Serial0` **RX** |
-| 2 | J1 CONTROLLER pin 2 — RX, input | ← | `HV2` · `LV2` | `D2 / GPIO4` | `Serial0` **TX** |
-| 3 | J2 PANEL pin 1 — RX, input | ← | `HV3` · `LV3` | `D3 / GPIO5` | `Serial1` **TX** |
-| 4 | J2 PANEL pin 2 — TX, output | → | `HV4` · `LV4` | `D4 / GPIO6` | `Serial1` **RX** |
+| 1 | J2 PANEL pin 1 — RX, **input** | ← | `HV1` · `LV1` | `D1 / GPIO3` | `Serial1` **TX** |
+| 2 | J2 PANEL pin 2 — TX, output | → | `HV2` · `LV2` | `D2 / GPIO4` | `Serial1` **RX** |
+| 3 | J1 CONTROLLER pin 1 — TX, output | → | `HV3` · `LV3` | `D3 / GPIO5` | `Serial0` **RX** |
+| 4 | J1 CONTROLLER pin 2 — RX, **input** | ← | `HV4` · `LV4` | `D4 / GPIO6` | `Serial0` **TX** |
 
-Identical to [`docs/wiring.md`](../../docs/build.md#4-go-inline) and to
-`firmware/include/config.h`, so a board built from this needs no firmware change.
+That is `PIN_RX_BOARD 5`, `PIN_TX_BOARD 6`, `PIN_TX_PANEL 3`, `PIN_RX_PANEL 4` —
+the as-built map already in `firmware/include/config.h`, so **a board built from
+this needs no firmware change.** `gen_pcb.py` asserts it on every run.
+
+Note this differs from the channel order in
+[`docs/wiring.md`](../../docs/wiring.md#as-built--the-authoritative-table), which
+describes the hand-wired module: there the controller landed on channels 1 and 2.
+The electrical result is identical; only which pair uses which converter channel
+moved, so that the connectors could sit on opposite edges.
+
+**The rule that decides every connection is unchanged:** an *output* stub must
+land on an ESP32 **RX** pin, an *input* stub must be **driven** by an ESP32 **TX**
+pin. Wiring a TX pin to another output is the one way to damage a board.
 
 Power: controller pin 4 = panel pin 4 = converter `HV` = XIAO `5V`, one net.
 XIAO `3V3` → converter `LV`. All grounds common.
@@ -130,38 +134,40 @@ This is the single most likely way to get an unusable board back from the fab.
 
 ## How small it can go
 
-31.5 × 26 mm is 819 mm², **45 % smaller than the 50 × 30 it started at** — and
-that is with two more connectors than the first version had.
+18.6 × 27 mm is 502 mm², **39 % smaller than the 819 mm² it replaced** and
+**41 % narrower** — which is the dimension that decides whether it fits a slot.
 
-The last reduction came from pulling J1 and J2 in against the block and noticing
-that pin 4 on both connectors is the *lowest* pin, so the +5V ring can come up
-each connector's own column from underneath instead of needing a side lane at
-either end. That removed two lanes outright. The width is fully accounted for:
+The width is now fully accounted for, and there is nothing left in it:
 
 ```
   0.5  edge
-  0.9  GND ring lane
-  1.8  J2 pads
-  1.4  ch4 and ch3 lanes
- 16.8  XIAO + shifter block  (15.24 row pitch + 1.6 pad)
-  2.1  GND, ch2 and ch1 lanes
-  1.8  J1 pads
-  0.7  flow-in lane
-  1.8  J3 / J4 pads
-  0.7  FV Vcc lane
-  0.9  GND ring lane
+ 16.8  XIAO pad block  (15.24 row pitch + 1.6 pad)
+  0.4  clearance
+  0.4  the one outer lane, shared by +5V (top) and GND (bottom)
   0.5  edge
-  3.6  clearances between the above
  ─────
- 31.5
+ 18.6
 ```
 
-Nothing further comes off without changing the design: the block is fixed by the
-XIAO, and every lane carries a net that has to cross the board. Real reductions
-would need **4 layers** (lets the rings run under everything, maybe 28 × 24), or
-**both connectors on one edge** (one set of lanes instead of two, maybe 30 × 24),
-or **discrete BSS138s instead of the module**, which removes 12 through-holes and
-the whole nesting problem.
+The four CN2 signals never need a side lane at all: each connector pin sits
+directly under the middle corridor, so it climbs straight out of its own pad
+into its shifter pin, turning once. Only +5V and GND have to reach both the
+XIAO's right-hand column and both connectors, and they share the single outer
+lane one per layer. Remove that lane and the board is 17.8 mm, but those two
+nets have nowhere to go.
+
+**The height is set by the XIAO's body, not by its copper.** The pads span
+15.24 mm; the module is 21.0 mm long, so it overhangs 2.88 mm at each end,
+straight over the connectors. At 24 mm the modules physically sit on both JST
+housings — the Gerbers look perfect and the boards arrive unbuildable.
+`gen_pcb.py` now checks the module outlines against every connector pad on each
+run for exactly this reason.
+
+Going further would need **right-angle connectors** (the overhang stops
+mattering and the board returns to ~24 mm), **discrete BSS138s instead of the
+module**, which removes 12 through-holes and the nesting problem entirely, or
+**4 layers**. Note that none of this saves money: JLCPCB charges the same for
+anything up to 100 × 100 mm, so size only buys fit.
 
 ## Files
 
@@ -212,12 +218,15 @@ complaint, not a geometry or connectivity one.
 
 **Checked by `gen_pcb.py`** on every run, independently of KiCad:
 
-- 2834 pairwise clearance checks at 0.20 mm — copper-to-copper on each layer,
+- 2186 pairwise clearance checks at 0.20 mm — copper-to-copper on each layer,
   and every track against every through-hole pad on both layers
 - annular ring ≥ 0.30 mm, drill ≥ 0.30 mm, 0.5 mm edge keepout
 - connectivity: every pad is on a net, every net has ≥ 2 pads, and every net
   forms a single connected island rather than two stranded halves
 - both Eagle files parse as well-formed XML
+- the board's pin map is compared against `firmware/include/config.h` and the
+  run fails on a mismatch
+- module bodies (not just their pads) are checked against every connector pad
 
 **Not checked.** Be clear-eyed about this list:
 

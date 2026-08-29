@@ -54,7 +54,6 @@ def main():
         if ref in known: return known[ref]
         return f"JST_XH_{len(ps)}" if ref.startswith("J") else f"GENERIC_{len(ps)}P"
     VALUES = {"J1": "JST-XH 4P (CONTROLLER)", "J2": "JST-XH 4P (PANEL)",
-              "J3": "JST-XH 3P (FLOW METER)", "J4": "JST-XH 3P (FV TO CONTROLLER)",
               "U1": "XIAO ESP32-C3", "U2": "4CH BSS138 LEVEL SHIFTER"}
 
     for ref, ps in by_ref.items():

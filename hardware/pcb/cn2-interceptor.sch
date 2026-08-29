@@ -38,13 +38,13 @@
 <packages>
 <package name="JST_XH_4">
 <pad name="1" x="0.0000" y="-0.0000" drill="1.00" diameter="1.80" shape="square"/>
-<pad name="2" x="0.0000" y="-2.5400" drill="1.00" diameter="1.80" shape="round"/>
-<pad name="3" x="0.0000" y="-5.0800" drill="1.00" diameter="1.80" shape="round"/>
-<pad name="4" x="0.0000" y="-7.6200" drill="1.00" diameter="1.80" shape="round"/>
-<wire x1="-1.300" y1="-8.920" x2="1.300" y2="-8.920" width="0.127" layer="21"/>
-<wire x1="1.300" y1="-8.920" x2="1.300" y2="1.300" width="0.127" layer="21"/>
-<wire x1="1.300" y1="1.300" x2="-1.300" y2="1.300" width="0.127" layer="21"/>
-<wire x1="-1.300" y1="1.300" x2="-1.300" y2="-8.920" width="0.127" layer="21"/>
+<pad name="2" x="2.5400" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<pad name="3" x="5.0800" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<pad name="4" x="7.6200" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<wire x1="-1.300" y1="-1.300" x2="8.920" y2="-1.300" width="0.127" layer="21"/>
+<wire x1="8.920" y1="-1.300" x2="8.920" y2="1.300" width="0.127" layer="21"/>
+<wire x1="8.920" y1="1.300" x2="-1.300" y2="1.300" width="0.127" layer="21"/>
+<wire x1="-1.300" y1="1.300" x2="-1.300" y2="-1.300" width="0.127" layer="21"/>
 <text x="-1.300" y="1.700" size="1.016" layer="25">&gt;NAME</text>
 </package>
 <package name="LS_2X6">
@@ -245,12 +245,12 @@
 </segment></net>
 <net name="CH1_HV" class="0">
 <segment>
-<pinref part="J1" gate="G$1" pin="1"/>
+<pinref part="J2" gate="G$1" pin="1"/>
 <pinref part="U2" gate="G$1" pin="HV1"/>
-<wire x1="15.24" y1="119.38" x2="71.12" y2="119.38" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="124.46" x2="15.24" y2="119.38" width="0.1524" layer="91"/>
-<wire x1="71.12" y1="114.30" x2="71.12" y2="119.38" width="0.1524" layer="91"/>
-<label x="15.24" y="120.18" size="1.27" layer="91"/>
+<wire x1="15.24" y1="100.33" x2="71.12" y2="100.33" width="0.1524" layer="91"/>
+<wire x1="15.24" y1="86.36" x2="15.24" y2="100.33" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="114.30" x2="71.12" y2="100.33" width="0.1524" layer="91"/>
+<label x="15.24" y="101.13" size="1.27" layer="91"/>
 </segment></net>
 <net name="CH1_LV" class="0">
 <segment>
@@ -263,12 +263,12 @@
 </segment></net>
 <net name="CH2_HV" class="0">
 <segment>
-<pinref part="J1" gate="G$1" pin="2"/>
+<pinref part="J2" gate="G$1" pin="2"/>
 <pinref part="U2" gate="G$1" pin="HV2"/>
-<wire x1="15.24" y1="116.84" x2="71.12" y2="116.84" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="121.92" x2="15.24" y2="116.84" width="0.1524" layer="91"/>
-<wire x1="71.12" y1="111.76" x2="71.12" y2="116.84" width="0.1524" layer="91"/>
-<label x="15.24" y="117.64" size="1.27" layer="91"/>
+<wire x1="15.24" y1="97.79" x2="71.12" y2="97.79" width="0.1524" layer="91"/>
+<wire x1="15.24" y1="83.82" x2="15.24" y2="97.79" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="111.76" x2="71.12" y2="97.79" width="0.1524" layer="91"/>
+<label x="15.24" y="98.59" size="1.27" layer="91"/>
 </segment></net>
 <net name="CH2_LV" class="0">
 <segment>
@@ -281,12 +281,12 @@
 </segment></net>
 <net name="CH3_HV" class="0">
 <segment>
-<pinref part="J2" gate="G$1" pin="1"/>
+<pinref part="J1" gate="G$1" pin="1"/>
 <pinref part="U2" gate="G$1" pin="HV3"/>
-<wire x1="15.24" y1="95.25" x2="71.12" y2="95.25" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="86.36" x2="15.24" y2="95.25" width="0.1524" layer="91"/>
-<wire x1="71.12" y1="104.14" x2="71.12" y2="95.25" width="0.1524" layer="91"/>
-<label x="15.24" y="96.05" size="1.27" layer="91"/>
+<wire x1="15.24" y1="114.30" x2="71.12" y2="114.30" width="0.1524" layer="91"/>
+<wire x1="15.24" y1="124.46" x2="15.24" y2="114.30" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="104.14" x2="71.12" y2="114.30" width="0.1524" layer="91"/>
+<label x="15.24" y="115.10" size="1.27" layer="91"/>
 </segment></net>
 <net name="CH3_LV" class="0">
 <segment>
@@ -299,12 +299,12 @@
 </segment></net>
 <net name="CH4_HV" class="0">
 <segment>
-<pinref part="J2" gate="G$1" pin="2"/>
+<pinref part="J1" gate="G$1" pin="2"/>
 <pinref part="U2" gate="G$1" pin="HV4"/>
-<wire x1="15.24" y1="92.71" x2="71.12" y2="92.71" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="83.82" x2="15.24" y2="92.71" width="0.1524" layer="91"/>
-<wire x1="71.12" y1="101.60" x2="71.12" y2="92.71" width="0.1524" layer="91"/>
-<label x="15.24" y="93.51" size="1.27" layer="91"/>
+<wire x1="15.24" y1="111.76" x2="71.12" y2="111.76" width="0.1524" layer="91"/>
+<wire x1="15.24" y1="121.92" x2="15.24" y2="111.76" width="0.1524" layer="91"/>
+<wire x1="71.12" y1="101.60" x2="71.12" y2="111.76" width="0.1524" layer="91"/>
+<label x="15.24" y="112.56" size="1.27" layer="91"/>
 </segment></net>
 <net name="CH4_LV" class="0">
 <segment>

@@ -24,12 +24,10 @@ def uuid():
     return f"00000000-0000-0000-0000-{_n[0]:012d}"
 
 # Which pads sit on the left of each symbol; the rest go on the right.
-LEFT_COUNT = {"J1": 4, "J2": 4, "J3": 3, "J4": 3, "U1": 7, "U2": 6}
+LEFT_COUNT = {"J1": 4, "J2": 4, "U1": 7, "U2": 6}
 VALUE = {
     "J1": "JST-XH 4P  CONTROLLER CN2",
     "J2": "JST-XH 4P  PANEL CN2",
-    "J3": "JST-XH 3P  FLOW METER",
-    "J4": "JST-XH 3P  FV TO CONTROLLER",
     "U1": "XIAO ESP32-C3",
     "U2": "4CH BSS138 LEVEL SHIFTER",
 }
@@ -37,7 +35,16 @@ VALUE = {
 # Spacing has to clear a stub plus a net label on both facing sides, which is
 # roughly 30 mm per side -- symbols any closer and the labels collide.
 PLACE = {"J2": (68.58, 121.92), "U2": (172.72, 121.92), "U1": (292.10, 121.92),
-         "J1": (398.78, 121.92), "J3": (203.20, 251.46), "J4": (332.74, 251.46)}
+         "J1": (398.78, 121.92)}
+
+# These tables are keyed by reference and the sheet is drawn from PLACE, so a
+# part that exists here but no longer exists in gen_pcb would be drawn as an
+# empty box with no pins -- which is exactly what happened when the flow-meter
+# relay was removed and this file was not updated with it. Fail loudly instead.
+_refs = {p.ref for p in B.pads}
+assert set(PLACE) == _refs, (
+    f"schematic parts {sorted(set(PLACE))} do not match the board "
+    f"{sorted(_refs)} -- update PLACE/VALUE/LEFT_COUNT together")
 
 PITCH = 2.54
 STUB  = 5.08
@@ -161,3 +168,13 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# Regenerating the previews that live beside these files (they are committed so
+# the README renders on GitHub without a KiCad install):
+#
+#   kicad-cli sch export svg --output . --no-background-color cn2-interceptor.kicad_sch
+#   kicad-cli pcb export svg --output preview-kicad.svg \
+#       --layers F.Cu,B.Cu,F.Silkscreen,Edge.Cuts cn2-interceptor.kicad_pcb
+#
+# They are NOT produced by this script, which is how they went stale once: the
+# board shrank and the committed SVGs still showed the old 31.5 x 26 mm layout.

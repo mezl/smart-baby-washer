@@ -34,27 +34,26 @@
 </layers>
 <board>
 <plain>
-<wire x1="0" y1="26.0" x2="31.5" y2="26.0" width="0.1" layer="20"/>
-<wire x1="31.5" y1="26.0" x2="31.5" y2="0.0" width="0.1" layer="20"/>
-<wire x1="31.5" y1="0.0" x2="0" y2="0.0" width="0.1" layer="20"/>
-<wire x1="0" y1="0.0" x2="0" y2="26.0" width="0.1" layer="20"/>
-<text x="2.000" y="24.800" size="0.850" layer="21">D8 CN2 INTERCEPT</text>
-<text x="0.800" y="5.600" size="0.800" layer="21">PNL</text>
-<text x="24.400" y="5.600" size="0.800" layer="21">CTL</text>
-<text x="27.300" y="12.800" size="0.800" layer="21">FV</text>
+<wire x1="0" y1="27.0" x2="18.6" y2="27.0" width="0.1" layer="20"/>
+<wire x1="18.6" y1="27.0" x2="18.6" y2="0.0" width="0.1" layer="20"/>
+<wire x1="18.6" y1="0.0" x2="0" y2="0.0" width="0.1" layer="20"/>
+<wire x1="0" y1="0.0" x2="0" y2="27.0" width="0.1" layer="20"/>
+<text x="0.900" y="25.700" size="0.800" layer="21">PNL</text>
+<text x="0.900" y="0.500" size="0.800" layer="21">CTL</text>
+<text x="5.265" y="13.200" size="0.800" layer="21">D8 CN2</text>
 </plain>
 <libraries>
 <library name="cn2interceptor">
 <packages>
 <package name="JST_XH_4">
 <pad name="1" x="0.0000" y="-0.0000" drill="1.00" diameter="1.80" shape="square"/>
-<pad name="2" x="0.0000" y="-2.5400" drill="1.00" diameter="1.80" shape="round"/>
-<pad name="3" x="0.0000" y="-5.0800" drill="1.00" diameter="1.80" shape="round"/>
-<pad name="4" x="0.0000" y="-7.6200" drill="1.00" diameter="1.80" shape="round"/>
-<wire x1="-1.300" y1="-8.920" x2="1.300" y2="-8.920" width="0.127" layer="21"/>
-<wire x1="1.300" y1="-8.920" x2="1.300" y2="1.300" width="0.127" layer="21"/>
-<wire x1="1.300" y1="1.300" x2="-1.300" y2="1.300" width="0.127" layer="21"/>
-<wire x1="-1.300" y1="1.300" x2="-1.300" y2="-8.920" width="0.127" layer="21"/>
+<pad name="2" x="2.5400" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<pad name="3" x="5.0800" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<pad name="4" x="7.6200" y="-0.0000" drill="1.00" diameter="1.80" shape="round"/>
+<wire x1="-1.300" y1="-1.300" x2="8.920" y2="-1.300" width="0.127" layer="21"/>
+<wire x1="8.920" y1="-1.300" x2="8.920" y2="1.300" width="0.127" layer="21"/>
+<wire x1="8.920" y1="1.300" x2="-1.300" y2="1.300" width="0.127" layer="21"/>
+<wire x1="-1.300" y1="1.300" x2="-1.300" y2="-1.300" width="0.127" layer="21"/>
 <text x="-1.300" y="1.700" size="1.016" layer="25">&gt;NAME</text>
 </package>
 <package name="LS_2X6">
@@ -213,10 +212,10 @@
 </designrules>
 <autorouter/>
 <elements>
-<element name="J1" library="cn2interceptor" package="JST_XH_4" value="JST-XH 4P" x="25.6000" y="16.8100"/>
-<element name="J2" library="cn2interceptor" package="JST_XH_4" value="JST-XH 4P" x="2.8000" y="16.8100"/>
-<element name="U2" library="cn2interceptor" package="LS_2X6" value="4CH BSS138" x="8.7400" y="19.3500"/>
-<element name="U1" library="cn2interceptor" package="XIAO_2X7" value="XIAO ESP32-C3" x="6.2000" y="20.6200"/>
+<element name="J1" library="cn2interceptor" package="JST_XH_4" value="JST-XH 4P" x="5.1600" y="1.6000"/>
+<element name="J2" library="cn2interceptor" package="JST_XH_4" value="JST-XH 4P" x="5.1600" y="25.4000"/>
+<element name="U2" library="cn2interceptor" package="LS_2X6" value="4CH BSS138" x="3.8900" y="19.8500"/>
+<element name="U1" library="cn2interceptor" package="XIAO_2X7" value="XIAO ESP32-C3" x="1.3500" y="21.1200"/>
 </elements>
 <signals>
 <signal name="+5V">
@@ -224,129 +223,91 @@
 <contactref element="J2" pad="4"/>
 <contactref element="U2" pad="HV"/>
 <contactref element="U1" pad="5V"/>
-<wire x1="18.9000" y1="14.2700" x2="14.0000" y2="14.2700" width="0.35" layer="16"/>
-<wire x1="14.0000" y1="14.2700" x2="14.0000" y2="24.0000" width="0.35" layer="16"/>
-<wire x1="14.0000" y1="24.0000" x2="21.4400" y2="24.0000" width="0.35" layer="16"/>
-<wire x1="21.4400" y1="24.0000" x2="21.4400" y2="20.6200" width="0.35" layer="16"/>
-<wire x1="18.9000" y1="14.2700" x2="16.0000" y2="14.2700" width="0.35" layer="16"/>
-<wire x1="16.0000" y1="14.2700" x2="16.0000" y2="3.6000" width="0.35" layer="16"/>
-<wire x1="16.0000" y1="3.6000" x2="25.6000" y2="3.6000" width="0.35" layer="16"/>
-<wire x1="25.6000" y1="3.6000" x2="25.6000" y2="9.1900" width="0.35" layer="16"/>
-<wire x1="16.0000" y1="3.6000" x2="2.8000" y2="3.6000" width="0.35" layer="16"/>
-<wire x1="2.8000" y1="3.6000" x2="2.8000" y2="9.1900" width="0.35" layer="16"/>
+<wire x1="12.7800" y1="25.4000" x2="12.7800" y2="23.9600" width="0.35" layer="1"/>
+<wire x1="12.7800" y1="23.9600" x2="17.8500" y2="23.9600" width="0.35" layer="1"/>
+<wire x1="17.8500" y1="23.9600" x2="17.8500" y2="21.1200" width="0.35" layer="1"/>
+<wire x1="17.8500" y1="21.1200" x2="16.5900" y2="21.1200" width="0.35" layer="1"/>
+<wire x1="17.8500" y1="21.1200" x2="17.8500" y2="14.7700" width="0.35" layer="1"/>
+<wire x1="17.8500" y1="14.7700" x2="14.0500" y2="14.7700" width="0.35" layer="1"/>
+<wire x1="12.7800" y1="1.6000" x2="12.7800" y2="3.0400" width="0.35" layer="1"/>
+<wire x1="12.7800" y1="3.0400" x2="17.8500" y2="3.0400" width="0.35" layer="1"/>
+<wire x1="17.8500" y1="3.0400" x2="17.8500" y2="14.7700" width="0.35" layer="1"/>
 </signal>
 <signal name="GND">
 <contactref element="J1" pad="3"/>
 <contactref element="J2" pad="3"/>
-<contactref element="J3" pad="GND"/>
-<contactref element="J4" pad="GND"/>
 <contactref element="U2" pad="GND_H"/>
 <contactref element="U2" pad="GND_L"/>
 <contactref element="U1" pad="GND"/>
-<wire x1="18.9000" y1="11.7300" x2="8.7400" y2="11.7300" width="0.35" layer="1"/>
-<wire x1="8.7400" y1="11.7300" x2="2.8000" y2="11.7300" width="0.3" layer="16"/>
-<wire x1="21.4400" y1="18.0800" x2="22.8000" y2="18.0800" width="0.35" layer="16"/>
-<wire x1="22.8000" y1="18.0800" x2="22.8000" y2="11.7300" width="0.35" layer="16"/>
-<wire x1="22.8000" y1="11.7300" x2="25.6000" y2="11.7300" width="0.35" layer="16"/>
-<wire x1="25.6000" y1="11.7300" x2="27.0000" y2="11.7300" width="0.35" layer="16"/>
-<wire x1="27.0000" y1="11.7300" x2="27.0000" y2="13.0000" width="0.35" layer="16"/>
-<wire x1="27.0000" y1="13.0000" x2="30.5000" y2="13.0000" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="13.0000" x2="30.5000" y2="18.0800" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="18.0800" x2="28.4000" y2="18.0800" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="13.0000" x2="30.5000" y2="7.9200" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="7.9200" x2="28.4000" y2="7.9200" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="7.9200" x2="30.5000" y2="1.3000" width="0.35" layer="16"/>
-<wire x1="30.5000" y1="1.3000" x2="0.7500" y2="1.3000" width="0.35" layer="16"/>
-<wire x1="0.7500" y1="1.3000" x2="0.7500" y2="11.7300" width="0.35" layer="16"/>
-<wire x1="0.7500" y1="11.7300" x2="2.8000" y2="11.7300" width="0.35" layer="16"/>
+<wire x1="10.2400" y1="25.4000" x2="10.2400" y2="23.9600" width="0.35" layer="16"/>
+<wire x1="10.2400" y1="23.9600" x2="17.8500" y2="23.9600" width="0.35" layer="16"/>
+<wire x1="17.8500" y1="23.9600" x2="17.8500" y2="18.5800" width="0.35" layer="16"/>
+<wire x1="17.8500" y1="18.5800" x2="16.5900" y2="18.5800" width="0.35" layer="16"/>
+<wire x1="17.8500" y1="18.5800" x2="17.8500" y2="12.2300" width="0.35" layer="16"/>
+<wire x1="17.8500" y1="12.2300" x2="14.0500" y2="12.2300" width="0.35" layer="16"/>
+<wire x1="10.2400" y1="1.6000" x2="10.2400" y2="3.0400" width="0.35" layer="16"/>
+<wire x1="10.2400" y1="3.0400" x2="17.8500" y2="3.0400" width="0.35" layer="16"/>
+<wire x1="17.8500" y1="3.0400" x2="17.8500" y2="12.2300" width="0.35" layer="16"/>
+<wire x1="14.0500" y1="12.2300" x2="3.8900" y2="12.2300" width="0.35" layer="1"/>
 </signal>
 <signal name="+3V3">
 <contactref element="U2" pad="LV"/>
 <contactref element="U1" pad="3V3"/>
-<wire x1="8.7400" y1="14.2700" x2="10.2000" y2="14.2700" width="0.3" layer="1"/>
-<wire x1="10.2000" y1="14.2700" x2="10.2000" y2="15.5400" width="0.3" layer="1"/>
-<wire x1="10.2000" y1="15.5400" x2="21.4400" y2="15.5400" width="0.3" layer="1"/>
-</signal>
-<signal name="FLOW_IN">
-<contactref element="J3" pad="SIG"/>
-<contactref element="U1" pad="D10"/>
-<wire x1="28.4000" y1="15.5400" x2="27.0000" y2="15.5400" width="0.3" layer="1"/>
-<wire x1="27.0000" y1="15.5400" x2="27.0000" y2="13.0000" width="0.3" layer="1"/>
-<wire x1="27.0000" y1="13.0000" x2="21.4400" y2="13.0000" width="0.3" layer="1"/>
-</signal>
-<signal name="FLOW_OUT">
-<contactref element="J4" pad="SIG"/>
-<contactref element="U1" pad="D7"/>
-<wire x1="28.4000" y1="5.3800" x2="21.4400" y2="5.3800" width="0.3" layer="1"/>
-</signal>
-<signal name="FV_VCC">
-<contactref element="J3" pad="VCC"/>
-<contactref element="J4" pad="VCC"/>
-<wire x1="28.4000" y1="20.6200" x2="29.9000" y2="20.6200" width="0.3" layer="1"/>
-<wire x1="29.9000" y1="20.6200" x2="29.9000" y2="10.4600" width="0.3" layer="1"/>
-<wire x1="29.9000" y1="10.4600" x2="28.4000" y2="10.4600" width="0.3" layer="1"/>
+<wire x1="3.8900" y1="14.7700" x2="12.8750" y2="14.7700" width="0.3" layer="1"/>
+<wire x1="12.8750" y1="14.7700" x2="12.8750" y2="16.0400" width="0.3" layer="1"/>
+<wire x1="12.8750" y1="16.0400" x2="16.5900" y2="16.0400" width="0.3" layer="1"/>
 </signal>
 <signal name="CH1_HV">
-<contactref element="J1" pad="1"/>
+<contactref element="J2" pad="1"/>
 <contactref element="U2" pad="HV1"/>
-<wire x1="18.9000" y1="19.3500" x2="18.9000" y2="24.0000" width="0.35" layer="1"/>
-<wire x1="18.9000" y1="24.0000" x2="24.2000" y2="24.0000" width="0.35" layer="1"/>
-<wire x1="24.2000" y1="24.0000" x2="24.2000" y2="16.8100" width="0.35" layer="1"/>
-<wire x1="24.2000" y1="16.8100" x2="25.6000" y2="16.8100" width="0.35" layer="1"/>
+<wire x1="5.1600" y1="25.4000" x2="5.1600" y2="19.8500" width="0.35" layer="1"/>
+<wire x1="5.1600" y1="19.8500" x2="14.0500" y2="19.8500" width="0.35" layer="1"/>
 </signal>
 <signal name="CH1_LV">
 <contactref element="U2" pad="LV1"/>
 <contactref element="U1" pad="D1"/>
-<wire x1="8.7400" y1="19.3500" x2="7.4700" y2="19.3500" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="19.3500" x2="7.4700" y2="18.0800" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="18.0800" x2="6.2000" y2="18.0800" width="0.3" layer="1"/>
+<wire x1="3.8900" y1="19.8500" x2="2.6200" y2="19.8500" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="19.8500" x2="2.6200" y2="18.5800" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="18.5800" x2="1.3500" y2="18.5800" width="0.3" layer="1"/>
 </signal>
 <signal name="CH2_HV">
-<contactref element="J1" pad="2"/>
+<contactref element="J2" pad="2"/>
 <contactref element="U2" pad="HV2"/>
-<wire x1="18.9000" y1="16.8100" x2="20.1700" y2="16.8100" width="0.3" layer="1"/>
-<wire x1="20.1700" y1="16.8100" x2="20.1700" y2="22.6000" width="0.3" layer="1"/>
-<wire x1="20.1700" y1="22.6000" x2="23.5000" y2="22.6000" width="0.3" layer="1"/>
-<wire x1="23.5000" y1="22.6000" x2="23.5000" y2="14.2700" width="0.3" layer="1"/>
-<wire x1="23.5000" y1="14.2700" x2="25.6000" y2="14.2700" width="0.3" layer="1"/>
+<wire x1="7.7000" y1="25.4000" x2="7.7000" y2="17.3100" width="0.35" layer="16"/>
+<wire x1="7.7000" y1="17.3100" x2="14.0500" y2="17.3100" width="0.35" layer="16"/>
 </signal>
 <signal name="CH2_LV">
 <contactref element="U2" pad="LV2"/>
 <contactref element="U1" pad="D2"/>
-<wire x1="8.7400" y1="16.8100" x2="7.4700" y2="16.8100" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="16.8100" x2="7.4700" y2="15.5400" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="15.5400" x2="6.2000" y2="15.5400" width="0.3" layer="1"/>
+<wire x1="3.8900" y1="17.3100" x2="2.6200" y2="17.3100" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="17.3100" x2="2.6200" y2="16.0400" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="16.0400" x2="1.3500" y2="16.0400" width="0.3" layer="1"/>
 </signal>
 <signal name="CH3_HV">
-<contactref element="J2" pad="1"/>
+<contactref element="J1" pad="1"/>
 <contactref element="U2" pad="HV3"/>
-<wire x1="18.9000" y1="9.1900" x2="15.0000" y2="9.1900" width="0.35" layer="1"/>
-<wire x1="15.0000" y1="9.1900" x2="15.0000" y2="4.0000" width="0.35" layer="1"/>
-<wire x1="15.0000" y1="4.0000" x2="4.9000" y2="4.0000" width="0.35" layer="1"/>
-<wire x1="4.9000" y1="4.0000" x2="4.9000" y2="16.8100" width="0.35" layer="1"/>
-<wire x1="4.9000" y1="16.8100" x2="2.8000" y2="16.8100" width="0.35" layer="1"/>
+<wire x1="5.1600" y1="1.6000" x2="5.1600" y2="9.6900" width="0.35" layer="1"/>
+<wire x1="5.1600" y1="9.6900" x2="14.0500" y2="9.6900" width="0.35" layer="1"/>
 </signal>
 <signal name="CH3_LV">
 <contactref element="U2" pad="LV3"/>
 <contactref element="U1" pad="D3"/>
-<wire x1="8.7400" y1="9.1900" x2="7.4700" y2="9.1900" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="9.1900" x2="7.4700" y2="13.0000" width="0.3" layer="1"/>
-<wire x1="7.4700" y1="13.0000" x2="6.2000" y2="13.0000" width="0.3" layer="1"/>
+<wire x1="3.8900" y1="9.6900" x2="2.6200" y2="9.6900" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="9.6900" x2="2.6200" y2="13.5000" width="0.3" layer="1"/>
+<wire x1="2.6200" y1="13.5000" x2="1.3500" y2="13.5000" width="0.3" layer="1"/>
 </signal>
 <signal name="CH4_HV">
-<contactref element="J2" pad="2"/>
+<contactref element="J1" pad="2"/>
 <contactref element="U2" pad="HV4"/>
-<wire x1="18.9000" y1="6.6500" x2="18.9000" y2="2.5000" width="0.35" layer="1"/>
-<wire x1="18.9000" y1="2.5000" x2="4.2000" y2="2.5000" width="0.35" layer="1"/>
-<wire x1="4.2000" y1="2.5000" x2="4.2000" y2="14.2700" width="0.35" layer="1"/>
-<wire x1="4.2000" y1="14.2700" x2="2.8000" y2="14.2700" width="0.35" layer="1"/>
+<wire x1="7.7000" y1="1.6000" x2="7.7000" y2="7.1500" width="0.35" layer="16"/>
+<wire x1="7.7000" y1="7.1500" x2="14.0500" y2="7.1500" width="0.35" layer="16"/>
 </signal>
 <signal name="CH4_LV">
 <contactref element="U2" pad="LV4"/>
 <contactref element="U1" pad="D4"/>
-<wire x1="8.7400" y1="6.6500" x2="7.4700" y2="6.6500" width="0.3" layer="16"/>
-<wire x1="7.4700" y1="6.6500" x2="7.4700" y2="10.4600" width="0.3" layer="16"/>
-<wire x1="7.4700" y1="10.4600" x2="6.2000" y2="10.4600" width="0.3" layer="16"/>
+<wire x1="3.8900" y1="7.1500" x2="2.6200" y2="7.1500" width="0.3" layer="16"/>
+<wire x1="2.6200" y1="7.1500" x2="2.6200" y2="10.9600" width="0.3" layer="16"/>
+<wire x1="2.6200" y1="10.9600" x2="1.3500" y2="10.9600" width="0.3" layer="16"/>
 </signal>
 </signals>
 </board></drawing></eagle>

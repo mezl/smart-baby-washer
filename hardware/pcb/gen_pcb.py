@@ -43,7 +43,7 @@ RULE_ANNULUS   = 0.30
 RULE_MIN_DRILL = 0.30
 EDGE_KEEPOUT   = 0.50
 
-BOARD_W, BOARD_H = 31.5, 26.0
+BOARD_W, BOARD_H = 18.6, 27.0
 pads, tracks, texts = [], [], []
 
 
@@ -66,67 +66,89 @@ class Text:
         self.s, self.x, self.y, self.size = s, x, y, size
 
 
-def header(ref, x0, y0, n, rows=1, rowgap=0.0, pitch=2.54, drill=1.0, pad=1.8):
-    """Vertical 2.54 mm through-hole header. Pin 1 square, rest round."""
+def header(ref, x0, y0, n, rows=1, rowgap=0.0, pitch=2.54, drill=1.0, pad=1.8,
+           horiz=False):
+    """2.54 mm through-hole header. Pin 1 square, rest round.
+
+    horiz=True lays the pins out along X instead of Y, which is what the CN2
+    connectors need now that they stand on the top and bottom edges."""
     out = []
     for r in range(rows):
         for i in range(n):
             idx = r*n + i + 1
-            p = Pad(ref, str(idx), x0 + r*rowgap, y0 + i*pitch, pad, pad, drill,
+            x = x0 + (i*pitch if horiz else r*rowgap)
+            y = y0 + (r*rowgap if horiz else i*pitch)
+            p = Pad(ref, str(idx), x, y, pad, pad, drill,
                     "rect" if idx == 1 else "circle")
             pads.append(p); out.append(p)
     return out
 
 
 # ============================================================================
-# placement — packed as tightly as the routing allows
+# placement — connectors on the top and bottom edges
 # ============================================================================
-# Every column position below is derived from a lane count, not chosen to look
-# tidy. Left to right the board is:
+# The previous revision stood both CN2 connectors on the LEFT and RIGHT edges,
+# and that is what made the board 31.5 mm wide: the XIAO's two pad rows are
+# 15.24 mm apart, so anything beside them adds width directly. Moving the
+# connectors to the top and bottom edges makes the board only as wide as the
+# XIAO plus a single routing lane, at the cost of about 2 mm of height:
 #
-#   ring ring | J2 | ch4 ch3 | XIAO+shifter block | GND ch2 ch1 | J1 | ring ring
+#     top edge     [ J2 -> FRONT PANEL ]
+#                    XIAO ESP32-C3, shifter nested inside its pad rows
+#     bottom edge  [ J1 -> MAIN BOARD  ]
 #
-# The block is fixed at 16.84 mm (15.24 mm row pitch plus a 1.6 mm pad), the
-# connectors at 1.8 mm, and each routing lane needs 0.35 mm of trace plus 0.2 mm
-# either side. That adds up to 36 mm, and there is nothing left to remove without
-# dropping to 4 layers or moving both connectors to one edge.
-CY = BOARD_H / 2.0
+# A 4-pin 2.54 mm connector spans 7.62 mm, so one fits an 18.6 mm edge with
+# room to route past it; two side by side would not, which is why they face
+# opposite ways. That also suits the cable run -- the two CN2 stubs leave the
+# board in opposite directions, the way they arrive.
+#
+# The flow-meter relay (J3/J4) of the previous revision is NOT on this board.
+# Its six pins could not share an edge with the CN2 connectors, and carrying
+# them cost more width than everything else put together.
 
-XL, XR     = 6.20, 21.44      # XIAO pad columns, 15.24 mm apart
-U2LV, U2HV = 8.74, 18.90      # shifter, centred in the gap
-J2X, J1X   = 2.80, 25.60      # panel left, controller right
-J3X = J4X  = 28.40            # flow relay: J3 to the meter, J4 to the controller
+# The XIAO does NOT sit centred. It is pushed to the left edge so the single
+# lane it needs on the right has room; the left side needs nothing outside the
+# pad column, so the space would otherwise be wasted.
+XL     = 1.35                     # left pad column, 0.55 mm off the edge
+XR     = XL + 15.24               # right pad column
+XMID   = (XL + XR) / 2.0
+CY     = BOARD_H / 2.0
+U2LV, U2HV = XMID - LS_ROW/2, XMID + LS_ROW/2   # shifter, nested inside U1
+Y_BOT, Y_TOP = 1.60, BOARD_H - 1.60             # the two connector rows
 
-# Lanes, each 0.30-0.35 mm of trace with at least 0.30 mm to whatever is beside
-# it. Every one of these was pulled in until that margin was reached.
-RING_L_GND, RING_R_GND = 0.75, 30.50
-LANE_CH4, LANE_CH3 = 4.20, 4.90            # J2 side
-LANE_GND, LANE_CH2, LANE_CH1 = 22.80, 23.50, 24.20   # J1 side
-LANE_FIN, LANE_FVCC = 27.00, 29.90         # flow relay side
-TOP, BOT_5V, BOT_CH, BOT_GND = 2.00, 22.40, 23.50, 24.70
+# Channels. XIAO-to-shifter is 0.94 mm each side: exactly one 0.30 mm trace per
+# layer, which is what the LV side needs and no more. The middle corridor
+# between the shifter's own columns is 8.5 mm of clear copper and carries the
+# four HV signals straight down to the connectors.
+CHL, CHR   = (XL + U2LV)/2.0, (U2HV + XR)/2.0
+COR0, COR1 = U2LV + 1.175, U2HV - 1.175   # usable corridor for a 0.35 trace
+LANE_R     = 17.85                        # the only lane outside the XIAO
+BAND_B, BAND_T = 3.04, BOARD_H - 3.04     # between a connector and the XIAO
 
-J2 = header("J2", J2X, CY - 3*2.54/2, 4)
-J1 = header("J1", J1X, CY - 3*2.54/2, 4)
+# Pin 1 leftmost. The two signal pins are the left pair and the two power pins
+# the right pair, which is both the CN2 cable order and the order the routing
+# wants: the signals climb straight out of their own pads into the corridor,
+# and the power pins are already nearest the lane they leave by.
+J_X0 = round((COR0 + COR1)/2.0 - 3*2.54/2, 2)     # 4 pins, centred in corridor
+
+# The PANEL connector takes the bottom edge and the CONTROLLER the top, which
+# is not arbitrary: it is what makes the board agree with the firmware's pin
+# map without a single config change.
+#
+# Routing forces LV1..LV4 to land on D1..D4 in order -- they share a 0.94 mm
+# channel and any other order makes their spans overlap four deep. D1..D4 are
+# GPIO3, 4, 5 and 6. The firmware's as-built map is rxb=5 txb=6 txp=3 rxp=4,
+# i.e. the CONTROLLER pair on GPIO5/6 (= D3/D4 = channels 3 and 4) and the
+# PANEL pair on GPIO3/4 (= D1/D2 = channels 1 and 2). Channels 3 and 4 are the
+# shifter's UPPER pins, so the controller has to enter from the top edge.
+#
+# Put them the other way round and the board still works, but only after
+# swapping the four PIN_* defines -- and a pin map that disagrees with the
+# copper is exactly the failure that costs a day: frames simply stop decoding.
+J2 = header("J2", J_X0, Y_BOT, 4, horiz=True)     # -> FRONT PANEL  (bottom)
+J1 = header("J1", J_X0, Y_TOP, 4, horiz=True)     # -> MAIN BOARD   (top)
 for i, n in enumerate("1234"):
     J1[i].name = n; J2[i].name = n
-
-# Flow-meter relay, built exactly like the CN2 interception: the FV cable is cut
-# and BOTH ends land on the board. J3 takes the meter, J4 goes on to the
-# controller, and the ESP32 sits in between -- so it can pass the real pulses
-# through, rewrite their rate, or synthesise flow on a dry bench.
-#
-#   J3  FV METER        Vcc  GND  SIG -> GPIO10
-#   J4  FV CONTROLLER   Vcc  GND  SIG <- GPIO20
-#
-# Vcc passes straight through J3 to J4 the same way CN2 pins 3 and 4 do; only the
-# signal line is broken. Both signal GPIOs have to come off the SAME side of the
-# XIAO to be routable, and of the three free pins only GPIO10 (D10) and GPIO20
-# (D7) are on the right-hand column -- GPIO7 (D5) is on the left. GPIO2/8/9 are
-# strapping pins and GPIO21 emits ROM boot chatter.
-J3 = header("J3", J3X, 5.38, 3)          # to the meter
-J4 = header("J4", J4X, 15.54, 3)         # on to the controller
-for i, n in enumerate(["VCC", "GND", "SIG"]):
-    J3[i].name = n; J4[i].name = n
 
 U1 = header("U1", XL, CY - 6*2.54/2, 7, rows=2, rowgap=XR-XL, pad=1.6)
 for i, n in enumerate(["D0","D1","D2","D3","D4","D5","D6"]):     U1[i].name = n
@@ -148,19 +170,90 @@ def net(name, *ps):
         p.net = name; NETS[name].append(p)
 
 net("+5V",  J1[3], J2[3], LS["HV"],    X["5V"])
-net("GND",  J1[2], J2[2], J3[1], J4[1], LS["GND_H"], LS["GND_L"], X["GND"])
+net("GND",  J1[2], J2[2], LS["GND_H"], LS["GND_L"], X["GND"])
 net("+3V3", LS["LV"], X["3V3"])
-net("FLOW_IN",  J3[2], X["D10"])     # meter pulses      -> GPIO10
-net("FLOW_OUT", J4[2], X["D7"])      # what the board sees <- GPIO20
-net("FV_VCC",   J3[0], J4[0])        # meter supply, straight through
 
-net("CH1_HV", J1[0], LS["HV1"]);  net("CH1_LV", LS["LV1"], X["D1"])
-net("CH2_HV", J1[1], LS["HV2"]);  net("CH2_LV", LS["LV2"], X["D2"])
-net("CH3_HV", J2[0], LS["HV3"]);  net("CH3_LV", LS["LV3"], X["D3"])
-net("CH4_HV", J2[1], LS["HV4"]);  net("CH4_LV", LS["LV4"], X["D4"])
+# ch1/ch2 = PANEL pair on D1/D2 (GPIO3/4);  ch3/ch4 = CONTROLLER pair on
+# D3/D4 (GPIO5/6). Matches firmware config.h exactly: rxb=5 txb=6 txp=3 rxp=4.
+net("CH1_HV", J2[0], LS["HV1"]);  net("CH1_LV", LS["LV1"], X["D1"])  # panel RX  <- GPIO3
+net("CH2_HV", J2[1], LS["HV2"]);  net("CH2_LV", LS["LV2"], X["D2"])  # panel TX  -> GPIO4
+net("CH3_HV", J1[0], LS["HV3"]);  net("CH3_LV", LS["LV3"], X["D3"])  # ctrl  TX  -> GPIO5
+net("CH4_HV", J1[1], LS["HV4"]);  net("CH4_LV", LS["LV4"], X["D4"])  # ctrl  RX  <- GPIO6
 
-NC = [X["D0"], X["D5"], X["D6"], X["D9"], X["D8"]]
+NC = [X["D0"], X["D5"], X["D6"], X["D10"], X["D9"], X["D8"], X["D7"]]
 for p in NC: p.net = "NC"
+
+# ============================================================================
+# mechanical — the module bodies, which the copper does not show
+# ============================================================================
+# The XIAO's PADS span 15.24 mm but its BODY is 21.0 mm long, so it overhangs
+# its own pad rows by 2.88 mm at each end -- straight over whatever is beyond
+# them. That is why the board is 27 mm tall and not 24: at 24 mm the XIAO sits
+# physically on top of both JST housings. Nothing in the Gerbers would have
+# shown it, and the boards would have arrived unbuildable.
+XIAO_BODY = (17.5, 21.0)      # datasheet outline, W x H as placed here
+LS_BODY   = (15.7, 13.2)
+
+def bodies():
+    """(name, x0, y0, x1, y1) plan-view outline of each module."""
+    out = []
+    for name, ps, (bw, bh) in (("U1", U1, XIAO_BODY), ("U2", U2, LS_BODY)):
+        cx = (min(p.x for p in ps) + max(p.x for p in ps)) / 2.0
+        cy = (min(p.y for p in ps) + max(p.y for p in ps)) / 2.0
+        out.append((name, cx-bw/2, cy-bh/2, cx+bw/2, cy+bh/2))
+    return out
+
+def mechanical():
+    """Module bodies must clear the connectors and stay on the board."""
+    bad = []
+    for name, x0, y0, x1, y1 in bodies():
+        if x0 < 0 or y0 < 0 or x1 > BOARD_W or y1 > BOARD_H:
+            bad.append(f"{name} body overhangs the board edge "
+                       f"({x0:.2f},{y0:.2f})-({x1:.2f},{y1:.2f})")
+        for p in pads:
+            if p.ref in ("U1", "U2"): continue
+            d = rect_rect((x0,y0,x1,y1), p.bbox())
+            if d <= 0:
+                bad.append(f"{name} body sits on {p.ref}.{p.name}")
+    return bad
+
+# ============================================================================
+# the board's pin map, checked against the firmware
+# ============================================================================
+# The netlist above decides which GPIO each CN2 wire lands on, and the firmware
+# has to agree or the link simply does not decode -- no error, no bad checksum,
+# just zero frames. That failure has already cost a day on this project once,
+# so it is asserted here rather than left to a comment: config.h is the file
+# that ships, and this is the board it must describe.
+XIAO_GPIO = {"D0":2, "D1":3, "D2":4, "D3":5, "D4":6, "D5":7, "D6":21,
+             "D7":20, "D8":8, "D9":9, "D10":10}
+
+def _gpio_of(chan):
+    """The XIAO GPIO carrying a channel's LV side."""
+    pad = [p for p in NETS[chan + "_LV"] if p.ref == "U1"][0]
+    return XIAO_GPIO[pad.name]
+
+# ch3 = controller TX -> we receive;  ch4 = controller RX -> we drive
+# ch1 = panel RX      -> we drive;    ch2 = panel TX      -> we receive
+BOARD_PINMAP = {"PIN_RX_BOARD": _gpio_of("CH3"), "PIN_TX_BOARD": _gpio_of("CH4"),
+                "PIN_TX_PANEL": _gpio_of("CH1"), "PIN_RX_PANEL": _gpio_of("CH2")}
+
+def check_firmware_pinmap():
+    """Compare against firmware/include/config.h. Returns a list of mismatches."""
+    import re
+    cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "..", "firmware", "include", "config.h")
+    if not os.path.exists(cfg):
+        return ["config.h not found — pin map NOT verified"]
+    txt = open(cfg).read()
+    out = []
+    for k, v in BOARD_PINMAP.items():
+        m = re.search(rf"^#define\s+{k}\s+(\d+)", txt, re.M)
+        if not m:
+            out.append(f"{k} missing from config.h")
+        elif int(m.group(1)) != v:
+            out.append(f"{k}: board GPIO{v}, firmware GPIO{m.group(1)}")
+    return out
 
 # ============================================================================
 # routing
@@ -168,79 +261,55 @@ for p in NC: p.net = "NC"
 def trk(n, layer, *pts, w=RULE_TRACE_W):
     tracks.append(Track(n, layer, list(pts), w))
 
-CHL = (XL + U2LV) / 2.0       # 0.94 mm channel, one 0.30 mm trace per layer
-CHR = (U2HV + XR) / 2.0
+# LV side: jog in the left channel to reach each D pin. Three fit on top
+# because their y spans do not overlap; the fourth takes the bottom layer.
+for nm, src_, dst, layer in (("CH1_LV", LS["LV1"], X["D1"], "top"),
+                             ("CH2_LV", LS["LV2"], X["D2"], "top"),
+                             ("CH3_LV", LS["LV3"], X["D3"], "top"),
+                             ("CH4_LV", LS["LV4"], X["D4"], "bottom")):
+    trk(nm, layer, (src_.x, src_.y), (CHL, src_.y), (CHL, dst.y), (dst.x, dst.y),
+        w=0.30)
 
-# LV side: jog in the left channel to reach each D pin. Three fit on top because
-# their y spans do not overlap; the fourth takes the bottom layer.
-for nm, src, dst, layer in (("CH1_LV", LS["LV1"], X["D1"], "top"),
-                            ("CH2_LV", LS["LV2"], X["D2"], "top"),
-                            ("CH3_LV", LS["LV3"], X["D3"], "top"),
-                            ("CH4_LV", LS["LV4"], X["D4"], "bottom")):
-    trk(nm, layer, (src.x, src.y), (CHL, src.y), (CHL, dst.y), (dst.x, dst.y), w=0.30)
+# HV side. Each signal pin sits directly under the corridor, so it climbs out
+# of its own pad and turns once, into its shifter pin. The inner pin's climb
+# crosses the outer pin's turn, which is the only reason two of these four are
+# on the bottom layer.
+trk("CH1_HV", "top",    (J2[0].x, J2[0].y), (J2[0].x, LS["HV1"].y), (LS["HV1"].x, LS["HV1"].y))
+trk("CH2_HV", "bottom", (J2[1].x, J2[1].y), (J2[1].x, LS["HV2"].y), (LS["HV2"].x, LS["HV2"].y))
+trk("CH3_HV", "top",    (J1[0].x, J1[0].y), (J1[0].x, LS["HV3"].y), (LS["HV3"].x, LS["HV3"].y))
+trk("CH4_HV", "bottom", (J1[1].x, J1[1].y), (J1[1].x, LS["HV4"].y), (LS["HV4"].x, LS["HV4"].y))
 
-# HV side. HV1 and HV4 sit at the ends of their column so they leave vertically;
-# HV2 uses the right channel and HV3 steps out into the wide middle gap. All four
-# then run round the ends of the XIAO.
-trk("CH1_HV", "top", (LS["HV1"].x, LS["HV1"].y), (LS["HV1"].x, TOP),
-    (LANE_CH1, TOP), (LANE_CH1, J1[0].y), (J1[0].x, J1[0].y))
-trk("CH2_HV", "top", (LS["HV2"].x, LS["HV2"].y), (CHR, LS["HV2"].y), (CHR, 3.4),
-    (LANE_CH2, 3.4), (LANE_CH2, J1[1].y), (J1[1].x, J1[1].y), w=0.30)
-trk("CH3_HV", "top", (LS["HV3"].x, LS["HV3"].y), (15.0, LS["HV3"].y), (15.0, 22.0),
-    (LANE_CH3, 22.0), (LANE_CH3, J2[0].y), (J2[0].x, J2[0].y))
-trk("CH4_HV", "top", (LS["HV4"].x, LS["HV4"].y), (LS["HV4"].x, BOT_CH),
-    (LANE_CH4, BOT_CH), (LANE_CH4, J2[1].y), (J2[1].x, J2[1].y))
+# +5V and GND both have to reach the XIAO's RIGHT pad column and both
+# connectors, so both use the outer lane -- one per layer, which is the whole
+# reason the lane has to exist and the board cannot be 17.8 mm wide.
+trk("+5V", "top", (J2[3].x, J2[3].y), (J2[3].x, BAND_B), (LANE_R, BAND_B),
+    (LANE_R, X["5V"].y), (X["5V"].x, X["5V"].y))
+trk("+5V", "top", (LANE_R, X["5V"].y), (LANE_R, LS["HV"].y), (LS["HV"].x, LS["HV"].y))
+trk("+5V", "top", (J1[3].x, J1[3].y), (J1[3].x, BAND_T), (LANE_R, BAND_T),
+    (LANE_R, LS["HV"].y))
 
-# 3V3 on top: it must cross the +5V climb somewhere and separating them by layer
-# is cheaper than routing round. It slips through the HV column at the ESP32's
-# own 3V3 row, which is the clear window between HV2 and the HV rail.
-trk("+3V3", "top", (LS["LV"].x, LS["LV"].y), (10.20, LS["LV"].y),
-    (10.20, X["3V3"].y), (X["3V3"].x, X["3V3"].y), w=0.30)
-
-# +5V, bottom. Both connectors' pin 4 is the LOWEST pin, so the ring comes up its
-# own column from underneath -- no side lane needed at either end, which is what
-# lets the connectors sit this close to the block.
-trk("+5V", "bottom", (LS["HV"].x, LS["HV"].y), (14.0, LS["HV"].y), (14.0, TOP),
-    (X["5V"].x, TOP), (X["5V"].x, X["5V"].y))
-trk("+5V", "bottom", (LS["HV"].x, LS["HV"].y), (16.0, LS["HV"].y), (16.0, BOT_5V),
-    (J1[3].x, BOT_5V), (J1[3].x, J1[3].y))
-trk("+5V", "bottom", (16.0, BOT_5V), (J2[3].x, BOT_5V), (J2[3].x, J2[3].y))
-
-# Flow relay, both on top. Each slips through a window between J1's pads -- the
-# 2.54 mm pitch leaves 0.74 mm between adjacent 1.8 mm pads, enough for a 0.3 mm
-# trace with 0.22 mm either side.
-trk("FLOW_IN", "top", (J3[2].x, J3[2].y), (LANE_FIN, J3[2].y),
-    (LANE_FIN, X["D10"].y), (X["D10"].x, X["D10"].y), w=0.30)
-# J4.SIG and D7 happen to share a row, so this one is a straight run below J1.
-trk("FLOW_OUT", "top", (J4[2].x, J4[2].y), (X["D7"].x, X["D7"].y), w=0.30)
-trk("FV_VCC", "top", (J3[0].x, J3[0].y), (LANE_FVCC, J3[0].y),
-    (LANE_FVCC, J4[0].y), (J4[0].x, J4[0].y), w=0.30)
-
-# GND: the two shifter grounds join across the middle gap on top; the run out to
-# J2 slips through the clear window between D3 and D4.
+trk("GND", "bottom", (J2[2].x, J2[2].y), (J2[2].x, BAND_B), (LANE_R, BAND_B),
+    (LANE_R, X["GND"].y), (X["GND"].x, X["GND"].y))
+trk("GND", "bottom", (LANE_R, X["GND"].y), (LANE_R, LS["GND_H"].y),
+    (LS["GND_H"].x, LS["GND_H"].y))
+trk("GND", "bottom", (J1[2].x, J1[2].y), (J1[2].x, BAND_T), (LANE_R, BAND_T),
+    (LANE_R, LS["GND_H"].y))
+# The shifter's two grounds join across the middle corridor on the other layer.
 trk("GND", "top", (LS["GND_H"].x, LS["GND_H"].y), (LS["GND_L"].x, LS["GND_L"].y))
-trk("GND", "bottom", (LS["GND_L"].x, LS["GND_L"].y), (J2[2].x, J2[2].y), w=0.30)
-trk("GND", "bottom", (X["GND"].x, X["GND"].y), (LANE_GND, X["GND"].y),
-    (LANE_GND, J1[2].y), (J1[2].x, J1[2].y))
-# Step down to y=13.0 before running out to the ring: at J1.3's own row this
-# passes 0.195 mm under J4's VCC pad, which is 5 um inside the clearance rule.
-# Step down to y=13.0 before running right: at J1.3's own row this passes
-# 0.195 mm under J4's VCC pad, 5 um inside the rule. LANE_FIN is free on the
-# bottom layer -- FLOW_IN uses it on top.
-trk("GND", "bottom", (J1[2].x, J1[2].y), (LANE_FIN, J1[2].y), (LANE_FIN, 13.0),
-    (RING_R_GND, 13.0), (RING_R_GND, J3[1].y), (J3[1].x, J3[1].y))
-trk("GND", "bottom", (RING_R_GND, 13.0), (RING_R_GND, J4[1].y), (J4[1].x, J4[1].y))
-trk("GND", "bottom", (RING_R_GND, J4[1].y), (RING_R_GND, BOT_GND),
-    (RING_L_GND, BOT_GND), (RING_L_GND, J2[2].y), (J2[2].x, J2[2].y))
+
+# 3V3 leaves the shifter into the corridor, steps down a row, and crosses the
+# HV column in the clear window between HV2 and the HV rail -- 1.27 mm of pitch
+# either side, which leaves 0.295 mm of copper-to-copper.
+trk("+3V3", "top", (LS["LV"].x, LS["LV"].y), (COR1, LS["LV"].y),
+    (COR1, X["3V3"].y), (X["3V3"].x, X["3V3"].y), w=0.30)
 
 # ============================================================================
 # silkscreen
 # ============================================================================
-texts += [
-    Text("D8 CN2 INTERCEPT", 2.0, 0.35, 0.85),
-    Text("PNL", 0.8, 19.6, 0.8),
-    Text("CTL", 24.4, 19.6, 0.8),
-    Text("FV", 27.3, 12.4, 0.8),
+texts = [
+    Text("PNL", 0.9, 0.50, 0.8),
+    Text("CTL", 0.9, BOARD_H - 1.30, 0.8),
+    Text("D8 CN2", COR0 + 0.2, CY - 0.50, 0.8),
 ]
 
 # ============================================================================
@@ -516,6 +585,23 @@ def main():
     print(f"shifter rows   {LS_ROW} mm  <-- verify with calipers before ordering")
     print(f"pads           {len(pads)}   tracks {len(tracks)}   nets {len(NETS)}")
     print(f"drills         {sorted(holes)} mm ({sum(len(v) for v in holes.values())} holes)")
+    mech = mechanical()
+    pm = check_firmware_pinmap()
+    print("pin map        " + "  ".join(f"{k.split('_',1)[1].lower()}={v}"
+                                        for k, v in BOARD_PINMAP.items()))
+    if pm:
+        print("PIN MAP        MISMATCH vs firmware/include/config.h")
+        for e in pm: print("   ", e)
+    else:
+        print("PIN MAP        matches firmware/include/config.h")
+    for name, x0, y0, x1, y1 in bodies():
+        print(f"body {name:<9} {x1-x0:.1f} x {y1-y0:.1f} mm   "
+              f"x {x0:.2f}..{x1:.2f}   y {y0:.2f}..{y1:.2f}")
+    if mech:
+        print("MECHANICAL     FAIL")
+        for m in mech: print("   ", m)
+    else:
+        print("MECHANICAL     PASS — module bodies clear the connectors")
     print(f"DRC            {checks} checks @ {RULE_CLEARANCE} mm clearance")
     if errs:
         print(f"DRC            FAIL — {len(errs)} violation(s)")
@@ -527,7 +613,7 @@ def main():
         for c in conn[:30]: print("   ", c)
     else:
         print("CONNECTIVITY   PASS — every net is one island, every pad landed on")
-    return 1 if (errs or conn) else 0
+    return 1 if (errs or conn or pm or mech) else 0
 
 if __name__ == "__main__":
     sys.exit(main())
