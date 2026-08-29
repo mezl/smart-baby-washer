@@ -411,3 +411,54 @@ SHARPEST MEASUREMENT (no channel labels needed, power off):
 measure resistance from the XIAO **D4/GPIO6 pad to 3V3**, then from
 **D1/GPIO3 pad to 3V3** as the reference. Good channel ~10k; the faulty
 one reads open. That one comparison localises the break.
+
+
+## 2026-08-28 (late): the LV (3V3) rail to the level converter is the fault
+
+The pull-up probe CHANGED STATE during the session, which is what finally
+identified the failing part:
+
+    earlier tonight   GPIO3->PANEL  PRESENT     GPIO6->CONTROLLER  MISSING
+    now               GPIO3->PANEL  MISSING     GPIO6->CONTROLLER  MISSING
+
+Kai reports the lid override worked earlier tonight (visible on the panel
+even while E5 was displayed) and does not work now. That matches the probe
+exactly: the panel channel had its pull-up while the override worked, and
+lost it when the override stopped working. Hardware does not change between
+two identical probes -- the connection is intermittent, and it degraded
+while the unit was being handled.
+
+Both TX channels failing TOGETHER points at one shared node, not two broken
+signal wires. The shared node is the converter LV rail: **XIAO 3V3 -> the
+converter LV pin**.
+
+Why that produces exactly this fault, on a BSS138-style shifter whose gates
+are tied to the LV rail:
+
+- LV rail dead -> every MOSFET gate sits at 0 V -> the transistor never turns
+  on, so the ESP->device direction is dead. Only the body diode conducts, so
+  our LOWS still reach the far side and our HIGHS never do. Both the panel
+  and the controller therefore receive broken data and each raises its own
+  comms fault -- panel shows E5, controller sets bit 6 five seconds after
+  boot.
+- device->ESP still works, because the Arduino UART enables the ESP32 pad
+  pull-up on RX, so reception needs nothing from the converter. That is why
+  every capture looked perfect: bad=0 in both directions, all week.
+- the bare machine works because the converter is not in the path at all.
+- the fault comes and goes with handling, which matches "it was working in
+  the morning" and "lid override worked before, even on E5".
+
+FIX: re-make the XIAO **3V3 -> converter LV** connection (and confirm the
+converter GND pad is common with XIAO GND). No meter needed to verify:
+
+    POST /api/pinprobe?pin=3
+    POST /api/pinprobe?pin=6
+
+Both must report "shifter pull-up present". Today they read MISSING, and a
+healthy channel read PRESENT earlier tonight, so the test has a confirmed
+positive control on this very board.
+
+Software was never implicated: the transmitted frames are byte-perfect with
+valid checksums, verified from the to_panel history
+(A2 18 00 C2 04 0C 03 73 received -> A2 58 00 82 04 0C 03 73 sent with a
+deliberate 88 C spoof and bit 6 stripped).
